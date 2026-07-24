@@ -564,16 +564,69 @@ export const graphScopes = [
 
 export const uploadScopes = ["Files.ReadWrite"] as const
 
+/**
+ * Accept only real http(s) origins. Rejects bare UUIDs / client IDs that are
+ * sometimes mistakenly set as NEXT_PUBLIC_APP_URL / APP_URL.
+ */
+function normalizeOrigin(value: string | null | undefined): string | null {
+  if (!value) return null
+  const trimmed = value.trim().replace(/\/$/, "")
+  if (!trimmed) return null
+
+  try {
+    const withProtocol = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`
+    const url = new URL(withProtocol)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null
+
+    const host = url.hostname.toLowerCase()
+    const looksLikeHost =
+      host === "localhost" || host.includes(".") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
+    if (!looksLikeHost) return null
+
+    return `${url.protocol}//${url.host}`
+  } catch {
+    return null
+  }
+}
+
+function requestProtocol(req: {
+  headers: {
+    host?: string
+    "x-forwarded-proto"?: string | string[]
+  }
+}): string {
+  if (typeof req.headers["x-forwarded-proto"] === "string") {
+    return req.headers["x-forwarded-proto"].split(",")[0]?.trim() || "https"
+  }
+  return req.headers.host?.includes("localhost") ? "http" : "https"
+}
+
+function originFromRequest(req?: {
+  headers: {
+    host?: string
+    "x-forwarded-proto"?: string | string[]
+  }
+}): string | null {
+  if (!req?.headers.host) return null
+  return normalizeOrigin(`${requestProtocol(req)}://${req.headers.host}`)
+}
+
 export function getAppOrigin() {
   const configured =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.APP_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : null) ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
+    normalizeOrigin(process.env.APP_URL) ??
+    normalizeOrigin(
+      process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : null
+    ) ??
+    normalizeOrigin(
+      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
+    )
 
-  return (configured ?? "http://localhost:3000").replace(/\/$/, "")
+  return configured ?? "http://localhost:3000"
 }
 
 export function getPublicSiteOrigin(req?: {
@@ -582,19 +635,14 @@ export function getPublicSiteOrigin(req?: {
     "x-forwarded-proto"?: string | string[]
   }
 }) {
-  if (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL) {
-    return getAppOrigin()
-  }
-
-  if (req?.headers.host && !req.headers.host.includes("localhost")) {
-    const protocol =
-      typeof req.headers["x-forwarded-proto"] === "string"
-        ? req.headers["x-forwarded-proto"].split(",")[0]?.trim()
-        : "https"
-    return `${protocol}://${req.headers.host}`.replace(/\/$/, "")
-  }
-
-  return getAppOrigin()
+  // Prefer a valid configured public URL, then the inbound request host so
+  // shareable portal links always include a real scheme + host.
+  return (
+    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
+    normalizeOrigin(process.env.APP_URL) ??
+    originFromRequest(req) ??
+    getAppOrigin()
+  )
 }
 
 function resolveRedirectUri(
@@ -610,18 +658,16 @@ function resolveRedirectUri(
     return process.env.ONEDRIVE_REDIRECT_URI.replace(/\/$/, "")
   }
 
-  if (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL) {
-    return `${getAppOrigin()}${pathName}`
+  const configured =
+    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
+    normalizeOrigin(process.env.APP_URL)
+  if (configured) {
+    return `${configured}${pathName}`
   }
 
-  if (req?.headers.host) {
-    const protocol =
-      typeof req.headers["x-forwarded-proto"] === "string"
-        ? req.headers["x-forwarded-proto"].split(",")[0]?.trim()
-        : req.headers.host.includes("localhost")
-          ? "http"
-          : "https"
-    return `${protocol}://${req.headers.host}${pathName}`
+  const fromRequest = originFromRequest(req)
+  if (fromRequest) {
+    return `${fromRequest}${pathName}`
   }
 
   return `${getAppOrigin()}${pathName}`

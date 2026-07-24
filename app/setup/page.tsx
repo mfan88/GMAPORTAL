@@ -202,19 +202,29 @@ export default function ConsolePage() {
         }
     }, [loadStatus, loadLinks])
 
-    const copyLink = useCallback(async (link: UploadLink) => {
-        try {
-            await navigator.clipboard.writeText(link.url)
-            setCopiedToken(link.token)
-            window.setTimeout(() => {
-                setCopiedToken((current) =>
-                    current === link.token ? null : current
-                )
-            }, 2000)
-        } catch {
-            setBanner({ type: "error", message: "Could not copy to clipboard" })
-        }
+    const portalLinkUrl = useCallback((token: string) => {
+        return `${window.location.origin}/portalaccess/${encodeURIComponent(token)}`
     }, [])
+
+    const copyLink = useCallback(
+        async (link: UploadLink) => {
+            try {
+                await navigator.clipboard.writeText(portalLinkUrl(link.token))
+                setCopiedToken(link.token)
+                window.setTimeout(() => {
+                    setCopiedToken((current) =>
+                        current === link.token ? null : current
+                    )
+                }, 2000)
+            } catch {
+                setBanner({
+                    type: "error",
+                    message: "Could not copy to clipboard",
+                })
+            }
+        },
+        [portalLinkUrl]
+    )
 
     const removeLink = useCallback(
         async (token: string) => {
@@ -514,7 +524,9 @@ export default function ConsolePage() {
                                                 <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-black/80">
                                                     <LinkIcon className="size-3.5 shrink-0" />
                                                     <span className="min-w-0 truncate">
-                                                        {link.url}
+                                                        {portalLinkUrl(
+                                                            link.token
+                                                        )}
                                                     </span>
                                                 </span>
                                                 {link.childName && (
