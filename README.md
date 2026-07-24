@@ -4,7 +4,7 @@ This is a project developed by Marcus Fan for the Developmental Disabilities Ass
 
 # Stack
 
-- NextJS (Typescript) + ShadCN component Fronted
+- NextJS (Typescript) + ShadCN component Frontend
 - Microsoft Graph API (File Uploading)
 - Upstash (Redis) for temporary link and config storage
 
