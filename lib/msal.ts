@@ -38,7 +38,8 @@ export function clearStaleMsalUrlParams() {
 
 export const msalClientId = process.env.NEXT_PUBLIC_AZURE_CLIENT_ID ?? ""
 
-// Personal Microsoft accounts + work/school (Entra ID) accounts.
+// /common requires Azure app SignInAudience = AzureADandPersonalMicrosoftAccount
+// ("Accounts in any org directory and personal Microsoft accounts").
 export const msalAuthority =
   process.env.NEXT_PUBLIC_AZURE_AUTHORITY ??
   "https://login.microsoftonline.com/common"

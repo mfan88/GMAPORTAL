@@ -13,6 +13,7 @@ import {
   type AccountInfo,
   type AuthorizationCodeRequest,
   type AuthorizationUrlRequest,
+  ConfidentialClientApplication,
   type ICachePlugin,
   PublicClientApplication,
   type SilentFlowRequest,
@@ -551,10 +552,19 @@ export const msalClientId =
   process.env.AZURE_CLIENT_ID ??
   ""
 
-// "common" supports personal Microsoft accounts and work/school (Entra ID) accounts.
+/** Required when redirect URIs are registered under the Web platform. */
+export const msalClientSecret = process.env.AZURE_CLIENT_SECRET ?? ""
+
+// /common requires Azure app SignInAudience = AzureADandPersonalMicrosoftAccount
+// ("Accounts in any org directory and personal Microsoft accounts").
 export const msalAuthority =
   process.env.AZURE_AUTHORITY ??
+  process.env.NEXT_PUBLIC_AZURE_AUTHORITY ??
   "https://login.microsoftonline.com/common"
+
+type ServerMsalClient =
+  | ConfidentialClientApplication
+  | PublicClientApplication
 
 export const graphScopes = [
   "User.Read",
@@ -810,7 +820,7 @@ export function getTokenStorageDescription() {
 // OneDrive / MSAL auth (server)
 // ===========================================================================
 
-let pca: PublicClientApplication | null = null
+let pca: ServerMsalClient | null = null
 
 function ensureClientId() {
   if (!msalClientId) {
@@ -835,18 +845,29 @@ function createCachePlugin(): ICachePlugin {
   }
 }
 
-export function getOneDriveClient() {
+function createServerMsalClient(options?: {
+  persistCache?: boolean
+}): ServerMsalClient {
   ensureClientId()
+  const auth = {
+    clientId: msalClientId,
+    authority: msalAuthority,
+    ...(msalClientSecret ? { clientSecret: msalClientSecret } : {}),
+  }
+  const cache = options?.persistCache
+    ? { cachePlugin: createCachePlugin() }
+    : undefined
+
+  // Web-platform redirect URIs are confidential clients and require a secret.
+  if (msalClientSecret) {
+    return new ConfidentialClientApplication({ auth, cache })
+  }
+  return new PublicClientApplication({ auth, cache })
+}
+
+export function getOneDriveClient() {
   if (!pca) {
-    pca = new PublicClientApplication({
-      auth: {
-        clientId: msalClientId,
-        authority: msalAuthority,
-      },
-      cache: {
-        cachePlugin: createCachePlugin(),
-      },
-    })
+    pca = createServerMsalClient({ persistCache: true })
   }
   return pca
 }
@@ -986,13 +1007,7 @@ export async function getUploadAccessLoginUrl(
   },
   loginHint?: string
 ) {
-  ensureClientId()
-  const client = new PublicClientApplication({
-    auth: {
-      clientId: msalClientId,
-      authority: msalAuthority,
-    },
-  })
+  const client = createServerMsalClient()
 
   const request: AuthorizationUrlRequest = {
     scopes: [...graphScopes],
@@ -1016,13 +1031,7 @@ export async function verifyUploadAccessIdentity(
     }
   }
 ) {
-  ensureClientId()
-  const client = new PublicClientApplication({
-    auth: {
-      clientId: msalClientId,
-      authority: msalAuthority,
-    },
-  })
+  const client = createServerMsalClient()
 
   const request: AuthorizationCodeRequest = {
     code,
@@ -1882,7 +1891,12 @@ export async function handleOneDriveOAuthCallback(request: NextRequest) {
     }
     return await completeSetupFlow(request, shaped, code, codeVerifier)
   } catch (err) {
-    const message = err instanceof Error ? err.message : "callback_failed"
+    const raw = err instanceof Error ? err.message : "callback_failed"
+    const needsSecret =
+      /AADSTS70002|client_secret/i.test(raw) && !msalClientSecret
+    const message = needsSecret
+      ? "Missing AZURE_CLIENT_SECRET. Create a client secret in Azure App registration → Certificates & secrets, then set AZURE_CLIENT_SECRET in Vercel / .env.local and redeploy."
+      : raw
     return errorRedirect(request, flow, message)
   }
 }
