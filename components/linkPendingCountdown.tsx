@@ -10,13 +10,17 @@ const TEN_MINUTES_MS = 10 * MINUTE_MS
 const SECOND_MS = 1000
 
 function formatCountdown(remainingMs: number): {
-  kind: "days" | "hours" | "mins" | "soon"
+  kind: "days" | "hours" | "mins" | "secs"
   text: string
 } {
   if (remainingMs < MINUTE_MS) {
+    const seconds = Math.min(
+      59,
+      Math.max(1, Math.ceil(remainingMs / SECOND_MS))
+    )
     return {
-      kind: "soon",
-      text: "Your link will be ready in less than a minute. Thank you for your patience.",
+      kind: "secs",
+      text: seconds === 1 ? "1 sec" : `${seconds} secs`,
     }
   }
 
@@ -93,16 +97,6 @@ export default function LinkPendingCountdown({
       <div className="flex max-w-xl flex-col items-center gap-3 text-center">
         <p className="text-lg text-black">
           Your link is ready. Taking you to the upload page…
-        </p>
-      </div>
-    )
-  }
-
-  if (countdown.kind === "soon") {
-    return (
-      <div className="flex max-w-xl flex-col items-center text-center">
-        <p className="text-lg font-semibold text-black sm:text-xl">
-          {countdown.text}
         </p>
       </div>
     )
