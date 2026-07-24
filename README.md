@@ -1,21 +1,13 @@
-# Next.js template
+# Vancouver Infant Development Program (IDP) General Movements Assessment (GMA) Video Upload Portal
 
-This is a Next.js template with shadcn/ui.
+This is a project developed by Marcus Fan for the Developmental Disabilities Association to streamline the process for receiving GMA videos from parents for the perusal of licensed physiotherapists.
 
-## Adding components
+# Stack
 
-To add components to your app, run the following command:
+- NextJS (Typescript) + ShadCN component Fronted
+- Microsoft Graph API (File Uploading)
+- Upstash (Redis) for temporary link and config storage
 
-```bash
-npx shadcn@latest add button
-```
+# Preview
+A demo model will be shown as soon as the project is finished.
 
-This will place the ui components in the `components` directory.
-
-## Using components
-
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button";
-```
