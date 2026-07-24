@@ -127,3 +127,25 @@
     @apply font-sans;
     }
 }
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.shimmer {
+  background-image: linear-gradient(
+    90deg,
+    currentColor 0%,
+    color-mix(in oklch, currentColor 35%, transparent) 50%,
+    currentColor 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.4s linear infinite;
+}

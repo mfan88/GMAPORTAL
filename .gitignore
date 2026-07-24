@@ -21,6 +21,7 @@
 # misc
 .DS_Store
 *.pem
+*.log
 
 # debug
 npm-debug.log*
@@ -28,9 +29,25 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env / secrets — set these in the Vercel project settings instead
+.env
+.env.*
+!.env.example
+
+# local runtime data (OneDrive MSAL token cache, etc.)
+.data/
+**/onedrive-cache.json
+settings.json
+
+# vercel CLI local project link
+.vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# editor / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db

@@ -1,0 +1,152 @@
+import { cn } from "@/lib/utils"
+import { useFileProviderContext } from "@/app/fileprovider"
+import { uploadFileToOneDrive } from "@/lib/upload"
+import {
+  ACCEPTED_UPLOAD_TYPES,
+  DEFAULT_APP_CONFIG,
+  MAX_UPLOAD_BYTES,
+  formatMaxUploadSize,
+} from "@/lib/appConfig"
+import { Button } from "@/components/ui/button"
+import { useCallback } from "react"
+import { useDropzone } from "react-dropzone"
+import FileDisplay from "./fileDisplay"
+
+interface UploadAreaProps {
+  className?: string
+}
+
+export default function UploadArea({
+  className,
+  ...props
+}: Readonly<UploadAreaProps>) {
+  const {
+    files,
+    setFiles,
+    setUploadError,
+    setUploadResult,
+    date,
+    isUploading,
+    setIsUploading,
+    uploadResult,
+    name,
+    ageWeeks,
+    hasFileSelected,
+  } = useFileProviderContext()
+
+  const runUpload = useCallback(
+    async (
+      file: File,
+      dateTaken: Date,
+      childName: string,
+      weeks: number
+    ) => {
+      setUploadError(null)
+      setUploadResult(null)
+      setIsUploading(true)
+
+      try {
+        const result = await uploadFileToOneDrive(
+          file,
+          dateTaken,
+          childName,
+          weeks
+        )
+        setUploadResult(result)
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Upload failed"
+        setUploadError(message)
+        console.error("OneDrive upload failed:", error)
+      } finally {
+        setIsUploading(false)
+      }
+    },
+    [setIsUploading, setUploadError, setUploadResult]
+  )
+
+  const canUpload =
+    Boolean(files?.file) &&
+    Boolean(date) &&
+    Boolean(name.trim()) &&
+    typeof ageWeeks === "number"
+
+  const { getRootProps, getInputProps } = useDropzone({
+    accept: ACCEPTED_UPLOAD_TYPES,
+    multiple: false,
+    maxFiles: DEFAULT_APP_CONFIG.fileDetails.maxFileCount,
+    maxSize: MAX_UPLOAD_BYTES,
+    useFsAccessApi: false,
+    disabled: hasFileSelected,
+    onDrop: (acceptedFile) => {
+      const [newFile] = acceptedFile
+      if (!newFile) return
+
+      setUploadError(null)
+      setUploadResult(null)
+      setFiles({
+        file: newFile,
+        previewUrl: URL.createObjectURL(newFile),
+      })
+    },
+    onDropRejected: (rejections) => {
+      const rejection = rejections[0]
+      const tooLarge = rejection?.errors.some(
+        (error) => error.code === "file-too-large"
+      )
+      setUploadError(
+        tooLarge
+          ? `Files must be ${formatMaxUploadSize()} or smaller.`
+          : "Only video files are supported."
+      )
+    },
+  })
+
+  const dropzoneProps = hasFileSelected ? {} : getRootProps()
+
+  return (
+    <div className="flex w-[80%] flex-col items-center gap-2">
+      <div
+        {...dropzoneProps}
+        className={cn(
+          "box-border flex flex-col items-center justify-center self-stretch rounded-xl px-20 py-32",
+          hasFileSelected
+            ? "border border-transparent"
+            : "cursor-pointer border border-dashed border-black/90",
+          className
+        )}
+        {...props}
+      >
+        {hasFileSelected ? (
+          <div className="flex items-center justify-center">
+            <FileDisplay className="gap-0" file={files} />
+          </div>
+        ) : (
+          <>
+            <input {...getInputProps()} />
+            <span>Drop or click here to add a video</span>
+            <span className="text-sm text-muted-foreground">
+              Please only select one video
+            </span>
+          </>
+        )}
+      </div>
+
+      {hasFileSelected && !isUploading && !uploadResult ? (
+        <Button
+          className={`w-[65%] ${canUpload ? "bg-blue" : "bg-none"}`}
+          variant="outline"
+          disabled={!canUpload}
+          onClick={() => {
+            if (!files?.file || !date || !name.trim() || typeof ageWeeks !== "number") {
+              return
+            }
+            void runUpload(files.file, date, name, ageWeeks)
+          }}
+        >
+          Upload
+        </Button>
+      ) : null}
+    </div>
+  )
+}

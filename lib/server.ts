@@ -1,0 +1,1743 @@
+import "server-only"
+
+import crypto from "node:crypto"
+import fs from "node:fs"
+import path from "node:path"
+import { randomUUID } from "node:crypto"
+import type { NextApiRequest } from "next"
+import type { NextRequest } from "next/server"
+import { NextResponse } from "next/server"
+import { Redis } from "@upstash/redis"
+import { del, get, put } from "@vercel/blob"
+import {
+  type AccountInfo,
+  type AuthorizationCodeRequest,
+  type AuthorizationUrlRequest,
+  type ICachePlugin,
+  PublicClientApplication,
+  type SilentFlowRequest,
+} from "@azure/msal-node"
+import * as XLSX from "xlsx"
+import {
+  type AppConfig,
+  type OneDriveUploadResult,
+  type OneDriveUploadSession,
+  DEFAULT_APP_CONFIG,
+  bufferTimeSeconds,
+  linkExpirySeconds,
+} from "@/lib/appConfig"
+
+export type { AppConfig, OneDriveUploadResult, OneDriveUploadSession }
+export { DEFAULT_APP_CONFIG, bufferTimeSeconds, linkExpirySeconds }
+
+// ===========================================================================
+// Redis
+// ===========================================================================
+
+let redisClient: Redis | null = null
+
+/** Shared Upstash Redis client (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN). */
+export function getRedis() {
+  if (!redisClient) {
+    redisClient = Redis.fromEnv()
+  }
+  return redisClient
+}
+
+// ===========================================================================
+// App config (Redis-backed overrides)
+// ===========================================================================
+
+const CONFIG_KEY = "app:config"
+
+type AppConfigOverrides = {
+  folderName?: string
+  bufferTimeMs?: number
+  linkExpiryTimeMs?: number
+  fileDetails?: Partial<AppConfig["fileDetails"]>
+  referenceSheetName?: string
+  childNameColumn?: string
+  edcColumn?: string
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function asPositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined
+}
+
+function normalizeOverrides(raw: unknown): AppConfigOverrides {
+  if (!isPlainObject(raw)) return {}
+
+  const fileDetailsRaw = raw.fileDetails
+  const fileDetails = isPlainObject(fileDetailsRaw)
+    ? {
+        maxFileCount: asPositiveNumber(fileDetailsRaw.maxFileCount),
+        maxFileSizeBytes: asPositiveNumber(fileDetailsRaw.maxFileSizeBytes),
+        maxSimpleFileSizeBytes: asPositiveNumber(
+          fileDetailsRaw.maxSimpleFileSizeBytes
+        ),
+        uploadChunkSizeBytes: asPositiveNumber(
+          fileDetailsRaw.uploadChunkSizeBytes
+        ),
+      }
+    : undefined
+
+  return {
+    folderName: asNonEmptyString(raw.folderName),
+    bufferTimeMs: asPositiveNumber(raw.bufferTimeMs),
+    linkExpiryTimeMs: asPositiveNumber(raw.linkExpiryTimeMs),
+    referenceSheetName: asNonEmptyString(raw.referenceSheetName),
+    childNameColumn: asNonEmptyString(raw.childNameColumn),
+    edcColumn: asNonEmptyString(raw.edcColumn),
+    fileDetails,
+  }
+}
+
+function mergeConfig(overrides: AppConfigOverrides): AppConfig {
+  return {
+    folderName: overrides.folderName ?? DEFAULT_APP_CONFIG.folderName,
+    bufferTimeMs: overrides.bufferTimeMs ?? DEFAULT_APP_CONFIG.bufferTimeMs,
+    linkExpiryTimeMs:
+      overrides.linkExpiryTimeMs ?? DEFAULT_APP_CONFIG.linkExpiryTimeMs,
+    referenceSheetName:
+      overrides.referenceSheetName ?? DEFAULT_APP_CONFIG.referenceSheetName,
+    childNameColumn:
+      overrides.childNameColumn ?? DEFAULT_APP_CONFIG.childNameColumn,
+    edcColumn: overrides.edcColumn ?? DEFAULT_APP_CONFIG.edcColumn,
+    acceptedUploadTypes: DEFAULT_APP_CONFIG.acceptedUploadTypes,
+    fileDetails: {
+      ...DEFAULT_APP_CONFIG.fileDetails,
+      ...Object.fromEntries(
+        Object.entries(overrides.fileDetails ?? {}).filter(
+          ([, value]) => value !== undefined
+        )
+      ),
+    },
+  }
+}
+
+/** Effective config: Redis overrides merged over code defaults. */
+export async function getAppConfig(): Promise<AppConfig> {
+  try {
+    const raw = await getRedis().get<unknown>(CONFIG_KEY)
+    return mergeConfig(normalizeOverrides(raw))
+  } catch {
+    return {
+      ...DEFAULT_APP_CONFIG,
+      fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
+    }
+  }
+}
+
+export async function updateAppConfig(
+  patch: AppConfigOverrides
+): Promise<AppConfig> {
+  const redis = getRedis()
+  const existing = normalizeOverrides(await redis.get<unknown>(CONFIG_KEY))
+  const next: AppConfigOverrides = {
+    folderName: patch.folderName ?? existing.folderName,
+    bufferTimeMs: patch.bufferTimeMs ?? existing.bufferTimeMs,
+    linkExpiryTimeMs: patch.linkExpiryTimeMs ?? existing.linkExpiryTimeMs,
+    referenceSheetName: patch.referenceSheetName ?? existing.referenceSheetName,
+    childNameColumn: patch.childNameColumn ?? existing.childNameColumn,
+    edcColumn: patch.edcColumn ?? existing.edcColumn,
+    fileDetails: {
+      ...existing.fileDetails,
+      ...patch.fileDetails,
+    },
+  }
+
+  await redis.set(CONFIG_KEY, next)
+  return mergeConfig(next)
+}
+
+export async function resetAppConfig(): Promise<AppConfig> {
+  await getRedis().del(CONFIG_KEY)
+  return {
+    ...DEFAULT_APP_CONFIG,
+    fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
+  }
+}
+
+// ===========================================================================
+// Upload links (Redis)
+// ===========================================================================
+
+const LINK_PREFIX = "link:"
+
+/**
+ * Link lifecycle in the admin console:
+ * - "provisioning": created but still inside its activation delay (not usable).
+ * - "pending": active and waiting for a parent to upload.
+ * - "used": consumed by a successful upload; kept until admin dismisses it.
+ */
+export type LinkState = "provisioning" | "pending" | "used"
+
+export type UploadLink = {
+  token: string
+  createdAt: number
+  usedAt: number | null
+  state: LinkState
+  childName: string | null
+  ageWeeks: number | null
+}
+
+type StoredLink = {
+  createdAt: number
+  usedAt?: number
+  childName?: string
+  ageWeeks?: number
+}
+
+function deriveState(value: StoredLink, bufferTimeMs: number): LinkState {
+  if (typeof value.usedAt === "number") return "used"
+  if (Date.now() < value.createdAt + bufferTimeMs) {
+    return "provisioning"
+  }
+  return "pending"
+}
+
+function toUploadLink(
+  token: string,
+  value: StoredLink,
+  bufferTimeMs: number
+): UploadLink {
+  return {
+    token,
+    createdAt: value.createdAt,
+    usedAt: value.usedAt ?? null,
+    state: deriveState(value, bufferTimeMs),
+    childName:
+      typeof value.childName === "string" && value.childName.trim()
+        ? value.childName.trim()
+        : null,
+    ageWeeks:
+      typeof value.ageWeeks === "number" && Number.isFinite(value.ageWeeks)
+        ? Math.max(0, Math.floor(value.ageWeeks))
+        : null,
+  }
+}
+
+export async function createUploadLink(input: {
+  childName: string
+  ageWeeks: number
+}): Promise<UploadLink> {
+  const childName = input.childName.trim()
+  if (!childName) {
+    throw new Error("A child name is required to generate a link.")
+  }
+  if (!Number.isFinite(input.ageWeeks) || input.ageWeeks < 0) {
+    throw new Error("A valid age in weeks is required to generate a link.")
+  }
+
+  const config = await getAppConfig()
+  const token = randomUUID()
+  const createdAt = Date.now()
+  const value: StoredLink = {
+    createdAt,
+    childName,
+    ageWeeks: Math.floor(input.ageWeeks),
+  }
+
+  await getRedis().set(`${LINK_PREFIX}${token}`, value, {
+    ex: linkExpirySeconds(config),
+  })
+
+  return toUploadLink(token, value, config.bufferTimeMs)
+}
+
+export async function listLinks(): Promise<UploadLink[]> {
+  const redis = getRedis()
+  const { bufferTimeMs } = await getAppConfig()
+
+  const tokens: string[] = []
+  let cursor = "0"
+  do {
+    const [next, keys] = await redis.scan(cursor, {
+      match: `${LINK_PREFIX}*`,
+      count: 100,
+    })
+    cursor = String(next)
+    for (const key of keys) {
+      tokens.push(key.slice(LINK_PREFIX.length))
+    }
+  } while (cursor !== "0")
+
+  if (tokens.length === 0) return []
+
+  const values = await redis.mget<Array<StoredLink | null>>(
+    ...tokens.map((token) => `${LINK_PREFIX}${token}`)
+  )
+
+  const links: UploadLink[] = []
+  tokens.forEach((token, index) => {
+    const value = values[index]
+    if (value && typeof value.createdAt === "number") {
+      links.push(toUploadLink(token, value, bufferTimeMs))
+    }
+  })
+
+  return links.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function removeUploadLink(token: string): Promise<void> {
+  await getRedis().del(`${LINK_PREFIX}${token}`)
+}
+
+export type LinkStatus =
+  | { status: "active" }
+  | { status: "expired" }
+  | { status: "pending"; availableAt: number }
+
+export async function checkUploadLink(token: string): Promise<LinkStatus> {
+  const value = await getRedis().get<StoredLink>(`${LINK_PREFIX}${token}`)
+  if (!value || typeof value.createdAt !== "number") {
+    return { status: "expired" }
+  }
+
+  if (typeof value.usedAt === "number") {
+    return { status: "expired" }
+  }
+
+  const { bufferTimeMs } = await getAppConfig()
+  const availableAt = value.createdAt + bufferTimeMs
+  if (Date.now() < availableAt) {
+    return { status: "pending", availableAt }
+  }
+
+  return { status: "active" }
+}
+
+export async function getUploadLink(token: string): Promise<UploadLink | null> {
+  const value = await getRedis().get<StoredLink>(`${LINK_PREFIX}${token}`)
+  if (!value || typeof value.createdAt !== "number") return null
+  const { bufferTimeMs } = await getAppConfig()
+  return toUploadLink(token, value, bufferTimeMs)
+}
+
+export async function uploadLinkUsable(token: string): Promise<boolean> {
+  const value = await getRedis().get<StoredLink>(`${LINK_PREFIX}${token}`)
+  return (
+    value != null &&
+    typeof value.createdAt === "number" &&
+    typeof value.usedAt !== "number"
+  )
+}
+
+export async function consumeUploadLink(token: string): Promise<boolean> {
+  const redis = getRedis()
+  const key = `${LINK_PREFIX}${token}`
+
+  const value = await redis.get<StoredLink>(key)
+  if (
+    !value ||
+    typeof value.createdAt !== "number" ||
+    typeof value.usedAt === "number"
+  ) {
+    return false
+  }
+
+  const updated: StoredLink = {
+    createdAt: value.createdAt,
+    usedAt: Date.now(),
+    childName: value.childName,
+    ageWeeks: value.ageWeeks,
+  }
+  await redis.set(key, updated)
+  return true
+}
+
+// ===========================================================================
+// Request shape
+// ===========================================================================
+
+export function toRequestShape(request: NextRequest) {
+  return {
+    headers: {
+      host: request.headers.get("host") ?? undefined,
+      "x-forwarded-proto":
+        request.headers.get("x-forwarded-proto") ?? undefined,
+      cookie: request.headers.get("cookie") ?? undefined,
+    },
+  }
+}
+
+// ===========================================================================
+// PKCE / auth-flow cookies
+// ===========================================================================
+
+export function createPkcePair() {
+  const verifier = crypto.randomBytes(32).toString("base64url")
+  const challenge = crypto
+    .createHash("sha256")
+    .update(verifier)
+    .digest("base64url")
+
+  return { verifier, challenge }
+}
+
+export const PKCE_COOKIE_NAME = "onedrive_pkce"
+export const AUTH_FLOW_COOKIE_NAME = "onedrive_auth_flow"
+
+export type OneDriveAuthFlow = "setup" | "upload-access" | "admin"
+
+function buildCookie(name: string, value: string, maxAgeSeconds: number) {
+  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}`
+}
+
+function clearCookie(name: string) {
+  return `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`
+}
+
+export function pkceCookieHeader(verifier: string) {
+  return buildCookie(PKCE_COOKIE_NAME, encodeURIComponent(verifier), 600)
+}
+
+export function clearPkceCookieHeader() {
+  return clearCookie(PKCE_COOKIE_NAME)
+}
+
+export function authFlowCookieHeader(flow: OneDriveAuthFlow) {
+  return buildCookie(AUTH_FLOW_COOKIE_NAME, flow, 600)
+}
+
+export function clearAuthFlowCookieHeader() {
+  return clearCookie(AUTH_FLOW_COOKIE_NAME)
+}
+
+export function setPkceCookie(
+  res: { setHeader: (name: string, value: string) => void },
+  verifier: string
+) {
+  res.setHeader("Set-Cookie", pkceCookieHeader(verifier))
+}
+
+export function setAuthFlowCookie(
+  res: { setHeader: (name: string, value: string | string[]) => void },
+  flow: OneDriveAuthFlow
+) {
+  res.setHeader("Set-Cookie", authFlowCookieHeader(flow))
+}
+
+export function clearPkceCookie(res: {
+  setHeader: (name: string, value: string) => void
+}) {
+  res.setHeader("Set-Cookie", clearPkceCookieHeader())
+}
+
+export function getPkceCookie(req: { headers: { cookie?: string } }) {
+  const cookieHeader = req.headers.cookie
+  if (!cookieHeader) return null
+
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...rest] = part.trim().split("=")
+    if (name === PKCE_COOKIE_NAME) {
+      return decodeURIComponent(rest.join("="))
+    }
+  }
+
+  return null
+}
+
+export function getAuthFlowCookie(req: {
+  headers: { cookie?: string }
+}): OneDriveAuthFlow | null {
+  const cookieHeader = req.headers.cookie
+  if (!cookieHeader) return null
+
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...rest] = part.trim().split("=")
+    if (name === AUTH_FLOW_COOKIE_NAME) {
+      const value = rest.join("=")
+      if (
+        value === "setup" ||
+        value === "upload-access" ||
+        value === "admin"
+      ) {
+        return value
+      }
+    }
+  }
+
+  return null
+}
+
+// ===========================================================================
+// Server MSAL / URL helpers
+// ===========================================================================
+
+export const msalClientId =
+  process.env.NEXT_PUBLIC_AZURE_CLIENT_ID ??
+  process.env.AZURE_CLIENT_ID ??
+  ""
+
+export const msalAuthority =
+  process.env.AZURE_AUTHORITY ??
+  "https://login.microsoftonline.com/consumers"
+
+export const graphScopes = [
+  "User.Read",
+  "Files.ReadWrite",
+  "Mail.Send",
+  "offline_access",
+] as const
+
+export const uploadScopes = ["Files.ReadWrite"] as const
+export const mailScopes = ["Mail.Send"] as const
+
+export function getAppOrigin() {
+  const configured =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.APP_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : null) ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+
+  return (configured ?? "http://localhost:3000").replace(/\/$/, "")
+}
+
+export function getPublicSiteOrigin(req?: {
+  headers: {
+    host?: string
+    "x-forwarded-proto"?: string | string[]
+  }
+}) {
+  if (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL) {
+    return getAppOrigin()
+  }
+
+  if (req?.headers.host && !req.headers.host.includes("localhost")) {
+    const protocol =
+      typeof req.headers["x-forwarded-proto"] === "string"
+        ? req.headers["x-forwarded-proto"].split(",")[0]?.trim()
+        : "https"
+    return `${protocol}://${req.headers.host}`.replace(/\/$/, "")
+  }
+
+  return getAppOrigin()
+}
+
+function resolveRedirectUri(
+  pathName: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  }
+) {
+  if (process.env.ONEDRIVE_REDIRECT_URI) {
+    return process.env.ONEDRIVE_REDIRECT_URI.replace(/\/$/, "")
+  }
+
+  if (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL) {
+    return `${getAppOrigin()}${pathName}`
+  }
+
+  if (req?.headers.host) {
+    const protocol =
+      typeof req.headers["x-forwarded-proto"] === "string"
+        ? req.headers["x-forwarded-proto"].split(",")[0]?.trim()
+        : req.headers.host.includes("localhost")
+          ? "http"
+          : "https"
+    return `${protocol}://${req.headers.host}${pathName}`
+  }
+
+  return `${getAppOrigin()}${pathName}`
+}
+
+export function getOneDriveRedirectUri(req?: {
+  headers: {
+    host?: string
+    "x-forwarded-proto"?: string | string[]
+  }
+}) {
+  return resolveRedirectUri("/api/auth/onedrive/callback", req)
+}
+
+export function getUploadAccessRedirectUri(req?: {
+  headers: {
+    host?: string
+    "x-forwarded-proto"?: string | string[]
+  }
+}) {
+  return resolveRedirectUri("/api/auth/upload-access/callback", req)
+}
+
+export function getRegisteredRedirectUris() {
+  if (process.env.ONEDRIVE_REDIRECT_URI) {
+    return [process.env.ONEDRIVE_REDIRECT_URI.replace(/\/$/, "")]
+  }
+
+  const origin = getAppOrigin()
+  return [
+    `${origin}/api/auth/onedrive/callback`,
+    `${origin}/api/auth/upload-access/callback`,
+  ]
+}
+
+// ===========================================================================
+// OneDrive token cache (Blob or local file)
+// ===========================================================================
+
+const BLOB_PATHNAME = "onedrive/token-cache.json"
+
+export function usesBlobTokenStore() {
+  return Boolean(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN)
+}
+
+export function getBlobAuthMode(): "oidc" | "token" | "none" {
+  if (process.env.BLOB_STORE_ID) return "oidc"
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "token"
+  return "none"
+}
+
+export function getFileTokenCachePath() {
+  if (process.env.ONEDRIVE_CACHE_PATH) {
+    return process.env.ONEDRIVE_CACHE_PATH
+  }
+
+  if (process.env.VERCEL) {
+    return "/tmp/onedrive-cache.json"
+  }
+
+  return path.join(process.cwd(), ".data", "onedrive-cache.json")
+}
+
+export async function readTokenCache(): Promise<string | null> {
+  if (usesBlobTokenStore()) {
+    try {
+      const result = await get(BLOB_PATHNAME, { access: "private" })
+      if (result?.statusCode !== 200 || !result.stream) {
+        return null
+      }
+      return await new Response(result.stream).text()
+    } catch {
+      return null
+    }
+  }
+
+  const filePath = getFileTokenCachePath()
+  if (!fs.existsSync(filePath)) {
+    return null
+  }
+
+  return fs.readFileSync(filePath, "utf8")
+}
+
+export async function writeTokenCache(serialized: string) {
+  if (usesBlobTokenStore()) {
+    await put(BLOB_PATHNAME, serialized, {
+      access: "private",
+      allowOverwrite: true,
+      contentType: "application/json",
+    })
+    return
+  }
+
+  if (process.env.VERCEL && !usesBlobTokenStore()) {
+    throw new Error(
+      "OneDrive tokens cannot be saved on Vercel without Blob storage. In the Vercel dashboard, create a Blob store for this project, redeploy, then connect again."
+    )
+  }
+
+  const filePath = getFileTokenCachePath()
+  const directory = path.dirname(filePath)
+  if (directory !== "/tmp" && !fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true })
+  }
+  fs.writeFileSync(filePath, serialized, "utf8")
+}
+
+export async function deleteTokenCache() {
+  if (usesBlobTokenStore()) {
+    try {
+      await del(BLOB_PATHNAME)
+    } catch {
+      // Blob may not exist yet.
+    }
+    return
+  }
+
+  const filePath = getFileTokenCachePath()
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath)
+  }
+}
+
+export function getTokenStorageDescription() {
+  const authMode = getBlobAuthMode()
+  if (authMode === "oidc") {
+    return "Vercel Blob (OIDC)"
+  }
+  if (authMode === "token") {
+    return "Vercel Blob"
+  }
+  if (process.env.VERCEL) {
+    return "unconfigured (connect Blob store to this project and redeploy)"
+  }
+  return "local file"
+}
+
+// ===========================================================================
+// OneDrive / MSAL auth (server)
+// ===========================================================================
+
+let pca: PublicClientApplication | null = null
+
+function ensureClientId() {
+  if (!msalClientId) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_AZURE_CLIENT_ID (or AZURE_CLIENT_ID). Set it in .env.local or your Vercel project environment."
+    )
+  }
+}
+
+function createCachePlugin(): ICachePlugin {
+  return {
+    beforeCacheAccess: async (cacheContext) => {
+      const serialized = await readTokenCache()
+      if (serialized) {
+        cacheContext.tokenCache.deserialize(serialized)
+      }
+    },
+    afterCacheAccess: async (cacheContext) => {
+      if (!cacheContext.cacheHasChanged) return
+      await writeTokenCache(cacheContext.tokenCache.serialize())
+    },
+  }
+}
+
+export function getOneDriveClient() {
+  ensureClientId()
+  if (!pca) {
+    pca = new PublicClientApplication({
+      auth: {
+        clientId: msalClientId,
+        authority: msalAuthority,
+      },
+      cache: {
+        cachePlugin: createCachePlugin(),
+      },
+    })
+  }
+  return pca
+}
+
+async function getStoredAccounts(): Promise<AccountInfo[]> {
+  const client = getOneDriveClient()
+  return client.getTokenCache().getAllAccounts()
+}
+
+export async function getConnectedOneDriveAccount(): Promise<AccountInfo | null> {
+  const accounts = await getStoredAccounts()
+  return accounts[0] ?? null
+}
+
+export function oneDriveAccountsMatch(
+  signedIn: AccountInfo,
+  connected: AccountInfo
+) {
+  if (
+    signedIn.homeAccountId &&
+    connected.homeAccountId &&
+    signedIn.homeAccountId === connected.homeAccountId
+  ) {
+    return true
+  }
+
+  if (
+    signedIn.localAccountId &&
+    connected.localAccountId &&
+    signedIn.localAccountId === connected.localAccountId
+  ) {
+    return true
+  }
+
+  const signedInUsername = signedIn.username?.trim().toLowerCase()
+  const connectedUsername = connected.username?.trim().toLowerCase()
+
+  return Boolean(
+    signedInUsername &&
+      connectedUsername &&
+      signedInUsername === connectedUsername
+  )
+}
+
+export async function getOneDriveConnectionStatus() {
+  const account = await getConnectedOneDriveAccount()
+  return {
+    connected: Boolean(account),
+    username: account?.username ?? null,
+  }
+}
+
+export async function getOneDriveLoginUrl(
+  codeChallenge: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  }
+) {
+  const client = getOneDriveClient()
+  const request: AuthorizationUrlRequest = {
+    scopes: [...graphScopes],
+    redirectUri: getOneDriveRedirectUri(req),
+    prompt: "select_account",
+    codeChallenge,
+    codeChallengeMethod: "S256",
+  }
+  return client.getAuthCodeUrl(request)
+}
+
+export async function completeOneDriveLogin(
+  code: string,
+  codeVerifier: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  }
+) {
+  const client = getOneDriveClient()
+  const request: AuthorizationCodeRequest = {
+    code,
+    codeVerifier,
+    scopes: [...graphScopes],
+    redirectUri: getOneDriveRedirectUri(req),
+  }
+  return client.acquireTokenByCode(request)
+}
+
+export async function getOneDriveAccessToken() {
+  return getGraphAccessToken([...uploadScopes])
+}
+
+export async function getMailAccessToken() {
+  return getGraphAccessToken([...mailScopes])
+}
+
+async function getGraphAccessToken(scopes: string[]) {
+  const client = getOneDriveClient()
+  const account = await getConnectedOneDriveAccount()
+  if (!account) {
+    throw new Error(
+      "OneDrive is not connected. Visit /setup and sign in with the receiving account."
+    )
+  }
+
+  const request: SilentFlowRequest = {
+    account,
+    scopes,
+    forceRefresh: false,
+  }
+
+  try {
+    const result = await client.acquireTokenSilent(request)
+    if (!result?.accessToken) {
+      throw new Error("Could not acquire Microsoft Graph access token.")
+    }
+    return result.accessToken
+  } catch {
+    throw new Error(
+      "Microsoft session expired or missing Mail.Send consent. Visit /setup and connect the receiving account again."
+    )
+  }
+}
+
+export async function clearOneDriveConnection() {
+  await deleteTokenCache()
+  pca = null
+}
+
+export async function getUploadAccessLoginUrl(
+  codeChallenge: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  },
+  loginHint?: string
+) {
+  ensureClientId()
+  const client = new PublicClientApplication({
+    auth: {
+      clientId: msalClientId,
+      authority: msalAuthority,
+    },
+  })
+
+  const request: AuthorizationUrlRequest = {
+    scopes: [...graphScopes],
+    redirectUri: getUploadAccessRedirectUri(req),
+    prompt: "select_account",
+    codeChallenge,
+    codeChallengeMethod: "S256",
+    ...(loginHint ? { loginHint } : {}),
+  }
+
+  return client.getAuthCodeUrl(request)
+}
+
+export async function verifyUploadAccessIdentity(
+  code: string,
+  codeVerifier: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  }
+) {
+  ensureClientId()
+  const client = new PublicClientApplication({
+    auth: {
+      clientId: msalClientId,
+      authority: msalAuthority,
+    },
+  })
+
+  const request: AuthorizationCodeRequest = {
+    code,
+    codeVerifier,
+    scopes: [...graphScopes],
+    redirectUri: getUploadAccessRedirectUri(req),
+  }
+
+  const result = await client.acquireTokenByCode(request)
+  return result.account ?? null
+}
+
+// ===========================================================================
+// Upload / admin access cookies
+// ===========================================================================
+
+export const UPLOAD_ACCESS_COOKIE = "upload_access"
+export const PORTAL_ACCESS_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
+export const ADMIN_ACCESS_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
+
+type PortalAccessPayload = {
+  type: "portal"
+  token: string
+  exp: number
+}
+
+type AdminAccessPayload = {
+  type: "admin"
+  username: string
+  exp: number
+}
+
+type AccessPayload = PortalAccessPayload | AdminAccessPayload
+
+function getUploadAccessSecret() {
+  const secret =
+    process.env.UPLOAD_ACCESS_SECRET ?? process.env.UPSTASH_REDIS_REST_TOKEN
+  if (secret) return secret
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Missing UPLOAD_ACCESS_SECRET. Add it to your Vercel environment variables."
+    )
+  }
+
+  return "dev-upload-access-secret"
+}
+
+function signPayload(payload: AccessPayload) {
+  const data = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  const signature = crypto
+    .createHmac("sha256", getUploadAccessSecret())
+    .update(data)
+    .digest("base64url")
+
+  return `${data}.${signature}`
+}
+
+function isValidSignature(data: string, signature: string) {
+  const expectedSignature = crypto
+    .createHmac("sha256", getUploadAccessSecret())
+    .update(data)
+    .digest("base64url")
+
+  const signatureBuffer = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expectedSignature)
+  return (
+    signatureBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  )
+}
+
+function decodeAccessPayload(data: string): AccessPayload | null {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(data, "base64url").toString("utf8")
+    ) as AccessPayload
+
+    if (!payload?.type || typeof payload.exp !== "number") return null
+    if (payload.type === "portal" && typeof payload.token !== "string") {
+      return null
+    }
+    if (payload.exp <= Math.floor(Date.now() / 1000)) return null
+
+    return payload
+  } catch {
+    return null
+  }
+}
+
+function readAccessPayload(
+  cookieHeader: string | undefined
+): AccessPayload | null {
+  if (!cookieHeader) return null
+
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...rest] = part.trim().split("=")
+    if (name !== UPLOAD_ACCESS_COOKIE) continue
+
+    const value = decodeURIComponent(rest.join("="))
+    const [data, signature] = value.split(".")
+    if (!data || !signature) return null
+    if (!isValidSignature(data, signature)) return null
+
+    return decodeAccessPayload(data)
+  }
+
+  return null
+}
+
+function buildAccessCookieHeader(value: string, maxAgeSeconds: number) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : ""
+  return `${UPLOAD_ACCESS_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`
+}
+
+export function createPortalAccessCookieHeader(token: string) {
+  const payload: PortalAccessPayload = {
+    type: "portal",
+    token,
+    exp: Math.floor(Date.now() / 1000) + PORTAL_ACCESS_MAX_AGE_SECONDS,
+  }
+
+  return buildAccessCookieHeader(
+    signPayload(payload),
+    PORTAL_ACCESS_MAX_AGE_SECONDS
+  )
+}
+
+export function createAdminAccessCookieHeader(username: string) {
+  const payload: AdminAccessPayload = {
+    type: "admin",
+    username,
+    exp: Math.floor(Date.now() / 1000) + ADMIN_ACCESS_MAX_AGE_SECONDS,
+  }
+
+  return buildAccessCookieHeader(
+    signPayload(payload),
+    ADMIN_ACCESS_MAX_AGE_SECONDS
+  )
+}
+
+export function clearUploadAccessCookieHeader() {
+  return `${UPLOAD_ACCESS_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`
+}
+
+function getPortalAccessToken(cookieHeader: string | undefined) {
+  const payload = readAccessPayload(cookieHeader)
+  return payload?.type === "portal" ? payload.token : null
+}
+
+export function hasValidAdminAccess(cookieHeader: string | undefined) {
+  const payload = readAccessPayload(cookieHeader)
+  return payload?.type === "admin"
+}
+
+export function getAdminAccessUsername(cookieHeader: string | undefined) {
+  const payload = readAccessPayload(cookieHeader)
+  return payload?.type === "admin" ? payload.username : null
+}
+
+export function getPortalAccessTokenFromRequest(req: {
+  headers: { cookie?: string }
+}) {
+  return getPortalAccessToken(req.headers.cookie)
+}
+
+export async function canAccessUploadPortal(req: {
+  headers: { cookie?: string }
+}) {
+  const status = await getOneDriveConnectionStatus()
+  if (!status.connected) {
+    return { allowed: true as const, connected: false as const }
+  }
+
+  if (hasValidAdminAccess(req.headers.cookie)) {
+    return { allowed: true as const, connected: true as const }
+  }
+
+  const token = getPortalAccessToken(req.headers.cookie)
+  if (token && (await uploadLinkUsable(token))) {
+    return { allowed: true as const, connected: true as const }
+  }
+
+  return {
+    allowed: false as const,
+    connected: true as const,
+    loginUrl: "/api/auth/upload-access/login",
+  }
+}
+
+export async function assertUploadPortalAccess(
+  req: NextApiRequest,
+  res: { status: (code: number) => { json: (body: unknown) => void } }
+) {
+  const access = await canAccessUploadPortal(req)
+  if (access.allowed) return true
+
+  res.status(401).json({
+    error:
+      "Upload access required. Use a parent link or sign in with the receiving OneDrive account.",
+  })
+  return false
+}
+
+// ===========================================================================
+// Graph / OneDrive file upload helpers
+// ===========================================================================
+
+function encodeDrivePath(drivePath: string) {
+  return drivePath.split("/").map(encodeURIComponent).join("/")
+}
+
+export async function buildDriveItemPath(filename: string) {
+  const { folderName } = await getAppConfig()
+  return `${folderName}/${filename}`
+}
+
+export function sanitizeUploadFilename(filename: string) {
+  const base = filename.split(/[/\\]/).pop()?.trim()
+  if (!base) {
+    throw new Error("A valid filename is required.")
+  }
+  return base
+}
+
+export async function assertValidUploadSize(fileSize: number) {
+  const {
+    fileDetails: { maxFileSizeBytes },
+  } = await getAppConfig()
+
+  if (!Number.isFinite(fileSize) || fileSize <= 0) {
+    throw new Error("File size is required.")
+  }
+  if (fileSize > maxFileSizeBytes) {
+    throw new Error(
+      `Files must be ${maxFileSizeBytes / (1024 * 1024)} MB or smaller.`
+    )
+  }
+}
+
+async function parseGraphError(res: Response) {
+  const details = await res.text()
+  if (details.includes("SPO license")) {
+    throw new Error(
+      "This upload needs a personal @outlook.com or @hotmail.com account. Connect a personal Microsoft account at /setup."
+    )
+  }
+  throw new Error(
+    `Upload failed (${res.status}): ${details || res.statusText}`
+  )
+}
+
+export async function uploadSmallFileToOneDrive(
+  file: File,
+  accessToken: string
+): Promise<OneDriveUploadResult> {
+  const {
+    fileDetails: { maxSimpleFileSizeBytes },
+  } = await getAppConfig()
+
+  if (file.size > maxSimpleFileSizeBytes) {
+    throw new Error(
+      `Use a resumable upload session for files over ${maxSimpleFileSizeBytes / (1024 * 1024)} MB.`
+    )
+  }
+
+  const driveItemPath = await buildDriveItemPath(file.name)
+  const encodedPath = encodeDrivePath(driveItemPath)
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/content`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    }
+  )
+
+  if (!res.ok) {
+    await parseGraphError(res)
+  }
+
+  const item = (await res.json()) as OneDriveUploadResult
+  if (!item.webUrl) {
+    throw new Error("Upload succeeded but OneDrive did not return a file URL.")
+  }
+
+  return item
+}
+
+export async function createOneDriveUploadSession(
+  accessToken: string,
+  filename: string
+): Promise<OneDriveUploadSession> {
+  const driveItemPath = await buildDriveItemPath(filename)
+  const encodedPath = encodeDrivePath(driveItemPath)
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/createUploadSession`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        item: {
+          "@microsoft.graph.conflictBehavior": "rename",
+          name: filename,
+        },
+      }),
+    }
+  )
+
+  if (!res.ok) {
+    await parseGraphError(res)
+  }
+
+  const session = (await res.json()) as OneDriveUploadSession
+  if (!session.uploadUrl) {
+    throw new Error("OneDrive did not return an upload session URL.")
+  }
+
+  return session
+}
+
+// ===========================================================================
+// OneDrive browsing (settings)
+// ===========================================================================
+
+export type DriveFolderOption = {
+  id: string
+  name: string
+}
+
+export type DriveWorkbookOption = {
+  id: string
+  name: string
+}
+
+type GraphDriveItem = {
+  id?: string
+  name?: string
+  folder?: Record<string, unknown>
+  file?: Record<string, unknown>
+}
+
+async function fetchGraphJson<T>(url: string, accessToken: string): Promise<T> {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    await parseGraphError(res)
+  }
+  return (await res.json()) as T
+}
+
+/** Top-level folders under the connected OneDrive root. */
+export async function listOneDriveRootFolders(
+  accessToken: string
+): Promise<DriveFolderOption[]> {
+  const data = await fetchGraphJson<{ value?: GraphDriveItem[] }>(
+    "https://graph.microsoft.com/v1.0/me/drive/root/children?$select=id,name,folder&$top=200",
+    accessToken
+  )
+
+  return (data.value ?? [])
+    .filter((item) => item.folder && typeof item.name === "string" && item.id)
+    .map((item) => ({ id: item.id as string, name: item.name as string }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+type GraphChildrenPage = {
+  value?: GraphDriveItem[]
+  "@odata.nextLink"?: string
+}
+
+async function listDriveChildrenPage(
+  url: string,
+  accessToken: string
+): Promise<GraphChildrenPage> {
+  return fetchGraphJson<GraphChildrenPage>(url, accessToken)
+}
+
+/**
+ * All .xlsx workbooks under the connected OneDrive, found by walking folders.
+ * Prefer this over Graph search — search is index-based and often misses
+ * newly uploaded files for minutes (or longer).
+ */
+export async function listOneDriveWorkbooks(
+  accessToken: string
+): Promise<DriveWorkbookOption[]> {
+  const MAX_WORKBOOKS = 200
+  const MAX_FOLDERS = 300
+
+  const seenNames = new Set<string>()
+  const workbooks: DriveWorkbookOption[] = []
+  const folderQueue: string[] = ["root"]
+  const visitedFolders = new Set<string>()
+
+  while (folderQueue.length > 0 && workbooks.length < MAX_WORKBOOKS) {
+    if (visitedFolders.size >= MAX_FOLDERS) break
+
+    const folderId = folderQueue.shift()
+    if (!folderId || visitedFolders.has(folderId)) continue
+    visitedFolders.add(folderId)
+
+    const childrenPath =
+      folderId === "root"
+        ? "https://graph.microsoft.com/v1.0/me/drive/root/children"
+        : `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`
+
+    let nextUrl: string | undefined =
+      `${childrenPath}?$select=id,name,file,folder&$top=200`
+
+    while (nextUrl && workbooks.length < MAX_WORKBOOKS) {
+      const page = await listDriveChildrenPage(nextUrl, accessToken)
+
+      for (const item of page.value ?? []) {
+        if (typeof item.id !== "string" || typeof item.name !== "string") {
+          continue
+        }
+
+        if (item.folder) {
+          if (
+            !visitedFolders.has(item.id) &&
+            visitedFolders.size + folderQueue.length < MAX_FOLDERS
+          ) {
+            folderQueue.push(item.id)
+          }
+          continue
+        }
+
+        if (!item.file) continue
+        if (!item.name.toLowerCase().endsWith(".xlsx")) continue
+        if (seenNames.has(item.name)) continue
+
+        seenNames.add(item.name)
+        workbooks.push({ id: item.id, name: item.name })
+        if (workbooks.length >= MAX_WORKBOOKS) break
+      }
+
+      nextUrl = page["@odata.nextLink"]
+    }
+  }
+
+  return workbooks.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function findOneDriveWorkbookByName(
+  accessToken: string,
+  filename: string
+): Promise<DriveWorkbookOption | null> {
+  const target = filename.trim().toLowerCase()
+  if (!target) return null
+
+  const workbooks = await listOneDriveWorkbooks(accessToken)
+  return (
+    workbooks.find((workbook) => workbook.name.toLowerCase() === target) ??
+    null
+  )
+}
+
+function columnLetterToIndex(letter: string): number | null {
+  // Excel columns are A..XFD (at most 3 letters). Longer strings like "Name"
+  // must be treated as header labels, not column letters.
+  const trimmed = letter.trim().toUpperCase()
+  if (!/^[A-Z]{1,3}$/.test(trimmed)) return null
+
+  let index = 0
+  for (const char of trimmed) {
+    index = index * 26 + (char.codePointAt(0)! - 64)
+  }
+  return index - 1
+}
+
+function cellToDisplayString(value: unknown): string {
+  if (value == null) return ""
+  if (typeof value === "string") return value.trim()
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim()
+  }
+  return ""
+}
+
+function resolveColumnIndex(
+  headerRow: unknown[],
+  columnSpec: string,
+  columnLabel = "Column"
+): number {
+  const target = columnSpec.trim()
+  if (!target) {
+    throw new Error(`${columnLabel} is not configured.`)
+  }
+
+  // Prefer matching the first-row header text so values like "Name" / "EDC"
+  // are never misread as Excel column letters.
+  const headerIndex = headerRow.findIndex(
+    (cell) => cellToDisplayString(cell).toLowerCase() === target.toLowerCase()
+  )
+  if (headerIndex !== -1) return headerIndex
+
+  const letterIndex = columnLetterToIndex(target)
+  if (letterIndex !== null) {
+    return letterIndex
+  }
+
+  throw new Error(
+    `Could not find column "${columnSpec}" in the first row of the reference workbook.`
+  )
+}
+
+function parseWorkbookDate(value: unknown): string | null {
+  if (value == null || value === "") return null
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10)
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value)
+    if (!parsed) return null
+    const date = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d))
+    if (Number.isNaN(date.getTime())) return null
+    return date.toISOString().slice(0, 10)
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const date = new Date(trimmed)
+    if (Number.isNaN(date.getTime())) return null
+    return date.toISOString().slice(0, 10)
+  }
+
+  return null
+}
+
+export type ReferenceChild = {
+  name: string
+  /** ISO date (YYYY-MM-DD) from the EDC column, when parseable. */
+  edc: string | null
+}
+
+/**
+ * Children from the configured reference workbook (name + EDC),
+ * in sheet order (first occurrence kept if duplicate names).
+ */
+export async function listChildNamesFromReferenceWorkbook(
+  accessToken: string
+): Promise<{
+  children: ReferenceChild[]
+  names: string[]
+  workbookName: string
+  column: string
+  edcColumn: string
+}> {
+  const config = await getAppConfig()
+  const workbookName = config.referenceSheetName.trim()
+  const column = config.childNameColumn.trim()
+  const edcColumn = config.edcColumn.trim()
+
+  if (!workbookName) {
+    throw new Error("Reference workbook is not configured.")
+  }
+  if (!column) {
+    throw new Error("Child name column is not configured.")
+  }
+  if (!edcColumn) {
+    throw new Error("EDC column is not configured.")
+  }
+
+  const workbook = await findOneDriveWorkbookByName(accessToken, workbookName)
+  if (!workbook) {
+    throw new Error(
+      `Reference workbook "${workbookName}" was not found in OneDrive.`
+    )
+  }
+
+  const contentRes = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/items/${workbook.id}/content`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+      redirect: "follow",
+    }
+  )
+  if (!contentRes.ok) {
+    const details = await contentRes.text()
+    throw new Error(
+      `Could not download "${workbookName}" (${contentRes.status}): ${
+        details || contentRes.statusText
+      }`
+    )
+  }
+
+  const buffer = Buffer.from(await contentRes.arrayBuffer())
+  const parsed = XLSX.read(buffer, { type: "buffer", cellDates: true })
+  const firstSheetName = parsed.SheetNames[0]
+  if (!firstSheetName) {
+    throw new Error(`No worksheets found in "${workbookName}".`)
+  }
+
+  const sheet = parsed.Sheets[firstSheetName]
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+  })
+
+  if (rows.length === 0) {
+    return { children: [], names: [], workbookName, column, edcColumn }
+  }
+
+  const headerRow = (rows[0] ?? []) as unknown[]
+  const nameIndex = resolveColumnIndex(headerRow, column, "Child name column")
+  const edcIndex = resolveColumnIndex(headerRow, edcColumn, "EDC column")
+  const seen = new Set<string>()
+  const children: ReferenceChild[] = []
+
+  for (const row of rows.slice(1)) {
+    const cells = (row ?? []) as unknown[]
+    const name = cellToDisplayString(cells[nameIndex])
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    children.push({
+      name,
+      edc: parseWorkbookDate(cells[edcIndex]),
+    })
+  }
+
+  return {
+    children,
+    names: children.map((child) => child.name),
+    workbookName,
+    column,
+    edcColumn,
+  }
+}
+
+// ===========================================================================
+// OAuth callback handler
+// ===========================================================================
+
+function redirectWithCookies(
+  request: NextRequest,
+  redirectPath: string,
+  cookies: string[]
+) {
+  const response = NextResponse.redirect(new URL(redirectPath, request.url), {
+    status: 307,
+  })
+  for (const cookie of cookies) {
+    response.headers.append("Set-Cookie", cookie)
+  }
+  return response
+}
+
+type RequestShape = ReturnType<typeof toRequestShape>
+
+const CLEAR_AUTH_COOKIES = () => [
+  clearPkceCookieHeader(),
+  clearAuthFlowCookieHeader(),
+]
+
+function errorRedirect(
+  request: NextRequest,
+  flow: string,
+  reason: string
+): NextResponse {
+  const destination =
+    flow === "upload-access" || flow === "admin"
+      ? `/upload-access-denied?error=${encodeURIComponent(reason)}`
+      : `/setup?error=${encodeURIComponent(reason)}`
+  return redirectWithCookies(request, destination, CLEAR_AUTH_COOKIES())
+}
+
+async function completeUploadAccessFlow(
+  request: NextRequest,
+  shaped: RequestShape,
+  code: string,
+  codeVerifier: string
+): Promise<NextResponse> {
+  const clearCookies = CLEAR_AUTH_COOKIES()
+
+  const connectedAccount = await getConnectedOneDriveAccount()
+  if (!connectedAccount?.username) {
+    return redirectWithCookies(
+      request,
+      "/upload-access-denied?error=not_configured",
+      clearCookies
+    )
+  }
+
+  const signedInAccount = await verifyUploadAccessIdentity(
+    code,
+    codeVerifier,
+    shaped
+  )
+  if (!signedInAccount?.username) {
+    return redirectWithCookies(
+      request,
+      "/upload-access-denied?error=missing_account",
+      [...clearCookies, clearUploadAccessCookieHeader()]
+    )
+  }
+
+  if (!oneDriveAccountsMatch(signedInAccount, connectedAccount)) {
+    const wrongAccountParams = new URLSearchParams({
+      error: "wrong_account",
+      signedIn: signedInAccount.username ?? "unknown",
+      expected: connectedAccount.username ?? "unknown",
+    })
+    return redirectWithCookies(
+      request,
+      `/upload-access-denied?${wrongAccountParams.toString()}`,
+      [...clearCookies, clearUploadAccessCookieHeader()]
+    )
+  }
+
+  return redirectWithCookies(request, "/setup", [
+    ...clearCookies,
+    clearUploadAccessCookieHeader(),
+  ])
+}
+
+async function completeAdminFlow(
+  request: NextRequest,
+  shaped: RequestShape,
+  code: string,
+  codeVerifier: string
+): Promise<NextResponse> {
+  const clearCookies = CLEAR_AUTH_COOKIES()
+
+  const connectedAccount = await getConnectedOneDriveAccount()
+  if (!connectedAccount?.username) {
+    return redirectWithCookies(request, "/setup", clearCookies)
+  }
+
+  const signedInAccount = await verifyUploadAccessIdentity(
+    code,
+    codeVerifier,
+    shaped
+  )
+  if (!signedInAccount?.username) {
+    return redirectWithCookies(
+      request,
+      "/upload-access-denied?error=missing_account",
+      clearCookies
+    )
+  }
+
+  if (!oneDriveAccountsMatch(signedInAccount, connectedAccount)) {
+    const wrongAccountParams = new URLSearchParams({
+      error: "wrong_account",
+      signedIn: signedInAccount.username ?? "unknown",
+      expected: connectedAccount.username ?? "unknown",
+    })
+    return redirectWithCookies(
+      request,
+      `/upload-access-denied?${wrongAccountParams.toString()}`,
+      clearCookies
+    )
+  }
+
+  return redirectWithCookies(request, "/setup", [
+    ...clearCookies,
+    createAdminAccessCookieHeader(signedInAccount.username),
+  ])
+}
+
+async function completeSetupFlow(
+  request: NextRequest,
+  shaped: RequestShape,
+  code: string,
+  codeVerifier: string
+): Promise<NextResponse> {
+  await completeOneDriveLogin(code, codeVerifier, shaped)
+  return redirectWithCookies(
+    request,
+    "/setup?connected=1",
+    CLEAR_AUTH_COOKIES()
+  )
+}
+
+export async function handleOneDriveOAuthCallback(request: NextRequest) {
+  const shaped = toRequestShape(request)
+  const flow = getAuthFlowCookie(shaped) ?? "setup"
+  const params = request.nextUrl.searchParams
+  const code = params.get("code")
+  const error = params.get("error")
+
+  if (error) {
+    return errorRedirect(
+      request,
+      flow,
+      params.get("error_description") ?? error
+    )
+  }
+  if (!code) {
+    return errorRedirect(request, flow, "missing_code")
+  }
+
+  const codeVerifier = getPkceCookie(shaped)
+  if (!codeVerifier) {
+    return errorRedirect(request, flow, "missing_pkce_verifier")
+  }
+
+  try {
+    if (flow === "upload-access") {
+      return await completeUploadAccessFlow(
+        request,
+        shaped,
+        code,
+        codeVerifier
+      )
+    }
+    if (flow === "admin") {
+      return await completeAdminFlow(request, shaped, code, codeVerifier)
+    }
+    return await completeSetupFlow(request, shaped, code, codeVerifier)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "callback_failed"
+    return errorRedirect(request, flow, message)
+  }
+}
