@@ -174,7 +174,22 @@ export default function ConsolePage() {
                             "OneDrive connected and ready to receive uploads.",
                     })
                 } else if (errorParam) {
-                    setBanner({ type: "error", message: errorParam })
+                    const emailParam = params.get("email")
+                    const setupErrors: Record<string, string> = {
+                        unauthorized_admin:
+                            "That Microsoft account is not on the admin allowlist.",
+                        no_admins_configured:
+                            "No admin emails are configured. Set ALLOWED_ADMIN_EMAILS in the environment, then connect again.",
+                        missing_account:
+                            "We could not read the Microsoft account you signed in with.",
+                        onedrive_not_allowlisted: emailParam
+                            ? `Add ${emailParam} to Allowed admin emails in Settings, then connect that OneDrive account again.`
+                            : "That OneDrive account is not on the admin allowlist. Add it in Settings, then try again.",
+                    }
+                    setBanner({
+                        type: "error",
+                        message: setupErrors[errorParam] ?? errorParam,
+                    })
                 }
             }, 0)
         }
@@ -423,12 +438,27 @@ export default function ConsolePage() {
 
                         <p className="mt-3 text-sm text-black/70">
                             {connected
-                                ? `Currently being uploaded to: ${status?.username ?? "unknown account"}`
-                                : "No OneDrive account is connected yet."}
+                                ? `Videos upload to: ${status?.username ?? "unknown account"}`
+                                : "No receiving OneDrive account is connected yet."}
+                        </p>
+                        <p className="mt-1 text-xs text-black/45">
+                            Changing this prompts a Microsoft sign-in for the
+                            receiving account. That email must already be in
+                            Allowed admin emails. Console login can still use a
+                            different allowlisted account.
                         </p>
 
-                        <div className="mt-3">
-                            {connected ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                                size="sm"
+                                nativeButton={false}
+                                render={<a href="/api/auth/onedrive/login" />}
+                            >
+                                {connected
+                                    ? "Change receiving OneDrive"
+                                    : "Connect receiving OneDrive"}
+                            </Button>
+                            {connected && (
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -437,15 +467,7 @@ export default function ConsolePage() {
                                 >
                                     {isDisconnecting
                                         ? "Disconnecting..."
-                                        : "Disconnect account"}
-                                </Button>
-                            ) : (
-                                <Button
-                                    size="sm"
-                                    nativeButton={false}
-                                    render={<a href="/api/auth/onedrive/login" />}
-                                >
-                                    Connect OneDrive account
+                                        : "Disconnect"}
                                 </Button>
                             )}
                         </div>

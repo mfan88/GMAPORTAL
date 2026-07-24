@@ -20,6 +20,11 @@ export type AppConfig = {
   childNameColumn: string
   /** Column header (or letter) with the EDC date. */
   edcColumn: string
+  /**
+   * Microsoft account emails allowed to open /setup and manage the console.
+   * Compared case-insensitively. Can also be seeded via ALLOWED_ADMIN_EMAILS.
+   */
+  allowedAdminEmails: string[]
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -38,6 +43,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   referenceSheetName: "REFERENCE.xlsx",
   childNameColumn: "Child Name",
   edcColumn: "EDC",
+  allowedAdminEmails: ["marcusfan06@outlook.com"],
 }
 
 

@@ -8,8 +8,8 @@ import {
     getOneDriveConnectionStatus,
     getBlobAuthMode,
     getTokenStorageDescription,
+    hasValidAdminAccess,
     usesBlobTokenStore,
-    clearUploadAccessCookieHeader,
     toRequestShape,
 } from "@/lib/server"
 
@@ -42,9 +42,12 @@ export async function GET(request: NextRequest) {
     }
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+    if (!(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))) {
+        return NextResponse.json({ error: "Admin access required" }, { status: 401 })
+    }
+
+    // Disconnect only the receiving OneDrive tokens — keep the admin console session.
     await clearOneDriveConnection()
-    const response = NextResponse.json({ connected: false })
-    response.headers.append("Set-Cookie", clearUploadAccessCookieHeader())
-    return response
+    return NextResponse.json({ connected: false })
 }

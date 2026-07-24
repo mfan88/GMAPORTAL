@@ -16,6 +16,10 @@ const errorMessages: Record<string, string> = {
         "The sign-in session expired. Please start the link again.",
     wrong_account:
         "You signed in with a different account than the receiving OneDrive account.",
+    unauthorized_admin:
+        "This Microsoft account is not authorized to access the admin console. Ask an existing admin to add your email to the allowlist.",
+    no_admins_configured:
+        "No admin emails are configured yet. Set ALLOWED_ADMIN_EMAILS in the environment or add emails in Settings.",
 }
 
 export default function UploadAccessDeniedPage() {

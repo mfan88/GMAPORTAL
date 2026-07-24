@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 import {
-    getConnectedOneDriveAccount,
     getUploadAccessLoginUrl,
     authFlowCookieHeader,
     createPkcePair,
@@ -13,12 +12,12 @@ export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
     try {
-        const connectedAccount = await getConnectedOneDriveAccount()
         const { verifier, challenge } = createPkcePair()
+        // Do not pass a loginHint tied to the OneDrive receiving account —
+        // any allowlisted admin should be able to pick their own Microsoft account.
         const loginUrl = await getUploadAccessLoginUrl(
             challenge,
-            toRequestShape(request),
-            connectedAccount?.username ?? undefined
+            toRequestShape(request)
         )
 
         const response = NextResponse.redirect(loginUrl, { status: 307 })

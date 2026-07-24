@@ -4,6 +4,7 @@ import {
     getOneDriveLoginUrl,
     authFlowCookieHeader,
     createPkcePair,
+    hasValidAdminAccess,
     pkceCookieHeader,
     toRequestShape,
 } from "@/lib/server"
@@ -11,6 +12,13 @@ import {
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
+    if (!(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))) {
+        return NextResponse.redirect(
+            new URL("/api/auth/admin/login", request.url),
+            { status: 307 }
+        )
+    }
+
     try {
         const { verifier, challenge } = createPkcePair()
         const loginUrl = await getOneDriveLoginUrl(

@@ -9,7 +9,7 @@ import {
 export const dynamic = "force-dynamic"
 
 export async function GET(request: Request) {
-  if (!hasValidAdminAccess(request.headers.get("cookie") ?? undefined)) {
+  if (!(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))) {
     return NextResponse.json({ error: "Admin access required" }, { status: 401 })
   }
 

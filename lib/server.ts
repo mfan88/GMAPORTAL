@@ -58,6 +58,7 @@ type AppConfigOverrides = {
   referenceSheetName?: string
   childNameColumn?: string
   edcColumn?: string
+  allowedAdminEmails?: string[]
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -74,6 +75,26 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function asEmailList(value: unknown): string[] | undefined {
+  if (typeof value === "string") {
+    const emails = value
+      .split(/[\n,;]+/)
+      .map(normalizeEmail)
+      .filter(Boolean)
+    return emails.length > 0 ? [...new Set(emails)] : []
+  }
+  if (!Array.isArray(value)) return undefined
+  const emails = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map(normalizeEmail)
+    .filter(Boolean)
+  return [...new Set(emails)]
 }
 
 function normalizeOverrides(raw: unknown): AppConfigOverrides {
@@ -100,6 +121,7 @@ function normalizeOverrides(raw: unknown): AppConfigOverrides {
     referenceSheetName: asNonEmptyString(raw.referenceSheetName),
     childNameColumn: asNonEmptyString(raw.childNameColumn),
     edcColumn: asNonEmptyString(raw.edcColumn),
+    allowedAdminEmails: asEmailList(raw.allowedAdminEmails),
     fileDetails,
   }
 }
@@ -115,6 +137,8 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
     childNameColumn:
       overrides.childNameColumn ?? DEFAULT_APP_CONFIG.childNameColumn,
     edcColumn: overrides.edcColumn ?? DEFAULT_APP_CONFIG.edcColumn,
+    allowedAdminEmails:
+      overrides.allowedAdminEmails ?? DEFAULT_APP_CONFIG.allowedAdminEmails,
     acceptedUploadTypes: DEFAULT_APP_CONFIG.acceptedUploadTypes,
     fileDetails: {
       ...DEFAULT_APP_CONFIG.fileDetails,
@@ -131,11 +155,21 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
 export async function getAppConfig(): Promise<AppConfig> {
   try {
     const raw = await getRedis().get<unknown>(CONFIG_KEY)
-    return mergeConfig(normalizeOverrides(raw))
+    const merged = mergeConfig(normalizeOverrides(raw))
+    return {
+      ...merged,
+      allowedAdminEmails: [
+        ...new Set([
+          ...merged.allowedAdminEmails.map(normalizeEmail),
+          ...envAllowedAdminEmails(),
+        ]),
+      ],
+    }
   } catch {
     return {
       ...DEFAULT_APP_CONFIG,
       fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
+      allowedAdminEmails: envAllowedAdminEmails(),
     }
   }
 }
@@ -152,6 +186,8 @@ export async function updateAppConfig(
     referenceSheetName: patch.referenceSheetName ?? existing.referenceSheetName,
     childNameColumn: patch.childNameColumn ?? existing.childNameColumn,
     edcColumn: patch.edcColumn ?? existing.edcColumn,
+    allowedAdminEmails:
+      patch.allowedAdminEmails ?? existing.allowedAdminEmails,
     fileDetails: {
       ...existing.fileDetails,
       ...patch.fileDetails,
@@ -167,7 +203,40 @@ export async function resetAppConfig(): Promise<AppConfig> {
   return {
     ...DEFAULT_APP_CONFIG,
     fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
+    allowedAdminEmails: [...DEFAULT_APP_CONFIG.allowedAdminEmails],
   }
+}
+
+function envAllowedAdminEmails(): string[] {
+  return asEmailList(process.env.ALLOWED_ADMIN_EMAILS) ?? []
+}
+
+/** Effective admin allowlist (Settings + ALLOWED_ADMIN_EMAILS env). */
+export async function getAllowedAdminEmails(): Promise<string[]> {
+  const config = await getAppConfig()
+  return config.allowedAdminEmails.map(normalizeEmail)
+}
+
+export async function isAllowedAdminEmail(
+  email: string | null | undefined
+): Promise<boolean> {
+  const normalized = typeof email === "string" ? normalizeEmail(email) : ""
+  if (!normalized) return false
+  const allowed = await getAllowedAdminEmails()
+  if (allowed.length === 0) return false
+  return allowed.includes(normalized)
+}
+
+async function adminAllowlistRejectionReason(
+  email: string | null | undefined
+): Promise<"no_admins_configured" | "unauthorized_admin" | null> {
+  const allowed = await getAllowedAdminEmails()
+  if (allowed.length === 0) return "no_admins_configured"
+  const normalized = typeof email === "string" ? normalizeEmail(email) : ""
+  if (!normalized || !allowed.includes(normalized)) {
+    return "unauthorized_admin"
+  }
+  return null
 }
 
 // ===========================================================================
@@ -482,19 +551,18 @@ export const msalClientId =
   process.env.AZURE_CLIENT_ID ??
   ""
 
+// "common" supports personal Microsoft accounts and work/school (Entra ID) accounts.
 export const msalAuthority =
   process.env.AZURE_AUTHORITY ??
-  "https://login.microsoftonline.com/consumers"
+  "https://login.microsoftonline.com/common"
 
 export const graphScopes = [
   "User.Read",
   "Files.ReadWrite",
-  "Mail.Send",
   "offline_access",
 ] as const
 
 export const uploadScopes = ["Files.ReadWrite"] as const
-export const mailScopes = ["Mail.Send"] as const
 
 export function getAppOrigin() {
   const configured =
@@ -829,10 +897,6 @@ export async function getOneDriveAccessToken() {
   return getGraphAccessToken([...uploadScopes])
 }
 
-export async function getMailAccessToken() {
-  return getGraphAccessToken([...mailScopes])
-}
-
 async function getGraphAccessToken(scopes: string[]) {
   const client = getOneDriveClient()
   const account = await getConnectedOneDriveAccount()
@@ -856,7 +920,7 @@ async function getGraphAccessToken(scopes: string[]) {
     return result.accessToken
   } catch {
     throw new Error(
-      "Microsoft session expired or missing Mail.Send consent. Visit /setup and connect the receiving account again."
+      "Microsoft session expired. Visit /setup and connect the receiving account again."
     )
   }
 }
@@ -1063,14 +1127,27 @@ function getPortalAccessToken(cookieHeader: string | undefined) {
   return payload?.type === "portal" ? payload.token : null
 }
 
-export function hasValidAdminAccess(cookieHeader: string | undefined) {
-  const payload = readAccessPayload(cookieHeader)
-  return payload?.type === "admin"
-}
-
 export function getAdminAccessUsername(cookieHeader: string | undefined) {
   const payload = readAccessPayload(cookieHeader)
   return payload?.type === "admin" ? payload.username : null
+}
+
+/** True when the cookie is a valid admin session for an allowlisted email. */
+export async function hasValidAdminAccess(
+  cookieHeader: string | undefined
+): Promise<boolean> {
+  const username = getAdminAccessUsername(cookieHeader)
+  if (!username) return false
+  return isAllowedAdminEmail(username)
+}
+
+export function cookieHeaderFromStore(
+  cookieStore: { getAll: () => Array<{ name: string; value: string }> }
+): string {
+  return cookieStore
+    .getAll()
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join("; ")
 }
 
 export function getPortalAccessTokenFromRequest(req: {
@@ -1087,7 +1164,7 @@ export async function canAccessUploadPortal(req: {
     return { allowed: true as const, connected: false as const }
   }
 
-  if (hasValidAdminAccess(req.headers.cookie)) {
+  if (await hasValidAdminAccess(req.headers.cookie)) {
     return { allowed: true as const, connected: true as const }
   }
 
@@ -1157,7 +1234,7 @@ async function parseGraphError(res: Response) {
   const details = await res.text()
   if (details.includes("SPO license")) {
     throw new Error(
-      "This upload needs a personal @outlook.com or @hotmail.com account. Connect a personal Microsoft account at /setup."
+      "This Microsoft account cannot write to OneDrive (missing SharePoint/OneDrive license). Connect a different account at /setup."
     )
   }
   throw new Error(
@@ -1649,11 +1726,6 @@ async function completeAdminFlow(
 ): Promise<NextResponse> {
   const clearCookies = CLEAR_AUTH_COOKIES()
 
-  const connectedAccount = await getConnectedOneDriveAccount()
-  if (!connectedAccount?.username) {
-    return redirectWithCookies(request, "/setup", clearCookies)
-  }
-
   const signedInAccount = await verifyUploadAccessIdentity(
     code,
     codeVerifier,
@@ -1667,15 +1739,13 @@ async function completeAdminFlow(
     )
   }
 
-  if (!oneDriveAccountsMatch(signedInAccount, connectedAccount)) {
-    const wrongAccountParams = new URLSearchParams({
-      error: "wrong_account",
-      signedIn: signedInAccount.username ?? "unknown",
-      expected: connectedAccount.username ?? "unknown",
-    })
+  const adminRejection = await adminAllowlistRejectionReason(
+    signedInAccount.username
+  )
+  if (adminRejection) {
     return redirectWithCookies(
       request,
-      `/upload-access-denied?${wrongAccountParams.toString()}`,
+      `/upload-access-denied?error=${adminRejection}`,
       clearCookies
     )
   }
@@ -1692,12 +1762,41 @@ async function completeSetupFlow(
   code: string,
   codeVerifier: string
 ): Promise<NextResponse> {
-  await completeOneDriveLogin(code, codeVerifier, shaped)
-  return redirectWithCookies(
-    request,
-    "/setup?connected=1",
-    CLEAR_AUTH_COOKIES()
-  )
+  // Only an already-signed-in allowlisted admin may change the receiving account.
+  const actingAdmin = getAdminAccessUsername(shaped.headers.cookie)
+  if (!(await isAllowedAdminEmail(actingAdmin))) {
+    return errorRedirect(request, "setup", "unauthorized_admin")
+  }
+
+  const result = await completeOneDriveLogin(code, codeVerifier, shaped)
+  const receivingEmail = result.account?.username
+  if (!receivingEmail) {
+    await clearOneDriveConnection()
+    return errorRedirect(request, "setup", "missing_account")
+  }
+
+  // The OneDrive account they signed in with must also be on the admin allowlist.
+  if (!(await isAllowedAdminEmail(receivingEmail))) {
+    await clearOneDriveConnection()
+    const params = new URLSearchParams({
+      error: "onedrive_not_allowlisted",
+      email: receivingEmail,
+    })
+    return redirectWithCookies(
+      request,
+      `/setup?${params.toString()}`,
+      [
+        ...CLEAR_AUTH_COOKIES(),
+        createAdminAccessCookieHeader(actingAdmin as string),
+      ]
+    )
+  }
+
+  // Keep the console session as the acting admin (may differ from receiving account).
+  return redirectWithCookies(request, "/setup?connected=1", [
+    ...CLEAR_AUTH_COOKIES(),
+    createAdminAccessCookieHeader(actingAdmin as string),
+  ])
 }
 
 export async function handleOneDriveOAuthCallback(request: NextRequest) {

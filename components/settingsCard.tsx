@@ -23,6 +23,7 @@ type SettingsForm = {
   edcColumn: string
   bufferMinutes: number
   expiryHours: number
+  allowedAdminEmailsText: string
 }
 
 function configToForm(config: AppConfig): SettingsForm {
@@ -33,10 +34,16 @@ function configToForm(config: AppConfig): SettingsForm {
     edcColumn: config.edcColumn,
     bufferMinutes: Math.max(0, Math.round(config.bufferTimeMs / 60_000)),
     expiryHours: Math.max(1, Math.round(config.linkExpiryTimeMs / 3_600_000)),
+    allowedAdminEmailsText: config.allowedAdminEmails.join("\n"),
   }
 }
 
 function formToConfigPatch(form: SettingsForm) {
+  const allowedAdminEmails = form.allowedAdminEmailsText
+    .split(/[\n,;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+
   return {
     folderName: form.folderName.trim(),
     referenceSheetName: form.referenceSheetName.trim(),
@@ -44,6 +51,7 @@ function formToConfigPatch(form: SettingsForm) {
     edcColumn: form.edcColumn.trim(),
     bufferTimeMs: Math.max(0, form.bufferMinutes) * 60_000,
     linkExpiryTimeMs: Math.max(1, form.expiryHours) * 3_600_000,
+    allowedAdminEmails: [...new Set(allowedAdminEmails)],
   }
 }
 
@@ -381,6 +389,30 @@ export default function SettingsCard({
                 }}
               />
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="settings-admin-emails">Allowed admin emails</Label>
+            <textarea
+              id="settings-admin-emails"
+              disabled={!editing}
+              rows={4}
+              placeholder={"name@outlook.com\nname@company.com"}
+              value={form.allowedAdminEmailsText}
+              onChange={(event) => {
+                const value = event.target.value
+                setForm((prev) =>
+                  prev ? { ...prev, allowedAdminEmailsText: value } : prev
+                )
+              }}
+              className="min-h-24 w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <p className="text-xs text-black/45">
+              One Microsoft account email per line. These accounts can open
+              /setup. The receiving OneDrive account must also be listed here
+              before you connect or change it. You can also seed this with
+              ALLOWED_ADMIN_EMAILS.
+            </p>
           </div>
         </div>
       )}

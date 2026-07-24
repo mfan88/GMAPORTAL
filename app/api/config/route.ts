@@ -21,7 +21,7 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  if (!hasValidAdminAccess(request.headers.get("cookie") ?? undefined)) {
+  if (!(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))) {
     return NextResponse.json({ error: "Admin access required" }, { status: 401 })
   }
 
@@ -37,7 +37,7 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!hasValidAdminAccess(request.headers.get("cookie") ?? undefined)) {
+  if (!(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))) {
     return NextResponse.json({ error: "Admin access required" }, { status: 401 })
   }
 

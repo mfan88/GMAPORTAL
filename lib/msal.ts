@@ -38,9 +38,10 @@ export function clearStaleMsalUrlParams() {
 
 export const msalClientId = process.env.NEXT_PUBLIC_AZURE_CLIENT_ID ?? ""
 
-// Personal Microsoft accounts only (@outlook.com, @hotmail.com, @live.com)
+// Personal Microsoft accounts + work/school (Entra ID) accounts.
 export const msalAuthority =
-  "https://login.microsoftonline.com/consumers"
+  process.env.NEXT_PUBLIC_AZURE_AUTHORITY ??
+  "https://login.microsoftonline.com/common"
 
 export const graphScopes = ["User.Read", "Files.ReadWrite"] as const
 
@@ -48,17 +49,11 @@ export const loginRequest = {
   scopes: [...graphScopes],
   authority: msalAuthority,
   prompt: "login" as const,
-  extraQueryParameters: {
-    domain_hint: "consumers",
-  },
 }
 
 export const tokenRequest = {
   scopes: ["Files.ReadWrite"],
   authority: msalAuthority,
-  extraQueryParameters: {
-    domain_hint: "consumers",
-  },
 }
 
 export function createMsalConfig(): Configuration {
