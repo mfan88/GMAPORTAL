@@ -874,7 +874,13 @@ export function getOneDriveClient() {
 
 async function getStoredAccounts(): Promise<AccountInfo[]> {
   const client = getOneDriveClient()
-  return client.getTokenCache().getAllAccounts()
+  const cache = client.getTokenCache()
+  // getAllAccounts() does not invoke the cache plugin — hydrate from disk/blob first.
+  const serialized = await readTokenCache()
+  if (serialized) {
+    cache.deserialize(serialized)
+  }
+  return cache.getAllAccounts()
 }
 
 export async function getConnectedOneDriveAccount(): Promise<AccountInfo | null> {
@@ -961,7 +967,9 @@ export async function completeOneDriveLogin(
 }
 
 export async function getOneDriveAccessToken() {
-  return getGraphAccessToken([...uploadScopes])
+  // Use the same scopes as the interactive OneDrive login so the cached
+  // refresh token can be redeemed without a scope mismatch.
+  return getGraphAccessToken([...graphScopes])
 }
 
 async function getGraphAccessToken(scopes: string[]) {
@@ -970,6 +978,12 @@ async function getGraphAccessToken(scopes: string[]) {
   if (!account) {
     throw new Error(
       "OneDrive is not connected. Visit /setup and sign in with the receiving account."
+    )
+  }
+
+  if (!msalClientSecret) {
+    throw new Error(
+      "Missing AZURE_CLIENT_SECRET. Set it in .env.local / Vercel, restart, then reconnect OneDrive at /setup."
     )
   }
 
@@ -985,9 +999,10 @@ async function getGraphAccessToken(scopes: string[]) {
       throw new Error("Could not acquire Microsoft Graph access token.")
     }
     return result.accessToken
-  } catch {
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
     throw new Error(
-      "Microsoft session expired. Visit /setup and connect the receiving account again."
+      `Microsoft session expired. Visit /setup and connect the receiving account again. (${detail})`
     )
   }
 }
