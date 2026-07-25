@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react"
+import { usePathname } from "next/navigation"
 import type { OneDriveUploadResult } from "@/lib/appConfig"
 
 export interface UploadFile {
@@ -29,8 +30,9 @@ export interface FileProviderContextType {
   setIsUploading: Dispatch<SetStateAction<boolean>>
   name: string
   setName: Dispatch<SetStateAction<string>>
-  ageWeeks: number | null
-  setAgeWeeks: Dispatch<SetStateAction<number | null>>
+  /** ISO EDC from the portal link; age is derived from this + date recorded. */
+  edc: string | null
+  setEdc: Dispatch<SetStateAction<string | null>>
   linkContextReady: boolean
   hasFileSelected: boolean
 }
@@ -50,6 +52,7 @@ export function useFileProviderContext() {
 }
 
 export function FileProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname()
   const [files, setFiles] = useState<UploadFile | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadResult, setUploadResult] =
@@ -57,31 +60,39 @@ export function FileProvider({ children }: { children: ReactNode }) {
   const [date, setDate] = useState<Date | undefined>(undefined)
   const [isUploading, setIsUploading] = useState(false)
   const [name, setName] = useState("")
-  const [ageWeeks, setAgeWeeks] = useState<number | null>(null)
+  const [edc, setEdc] = useState<string | null>(null)
   const [linkContextReady, setLinkContextReady] = useState(false)
   const hasFileSelected = files !== null
 
+  // Refetch whenever the upload page is shown. Root layout keeps this provider
+  // mounted across /link-expired → /portalaccess → /, so a mount-only fetch
+  // would miss the portal cookie set after the countdown.
   useEffect(() => {
+    if (pathname !== "/") {
+      return
+    }
+
     let cancelled = false
+    setLinkContextReady(false)
 
     void fetch("/api/upload/context")
       .then(async (res) => {
         const data = (await res.json()) as {
           childName?: string | null
-          ageWeeks?: number | null
+          edc?: string | null
           error?: string
         }
         if (!res.ok || cancelled) return
         if (typeof data.childName === "string" && data.childName.trim()) {
           setName(data.childName.trim())
         }
-        if (typeof data.ageWeeks === "number" && Number.isFinite(data.ageWeeks)) {
-          setAgeWeeks(Math.max(0, Math.floor(data.ageWeeks)))
+        if (typeof data.edc === "string" && data.edc.trim()) {
+          setEdc(data.edc.trim())
         }
       })
       .catch(() => {
         // Parents without a bound link (or admins testing) simply won't have
-        // name/age prefilled — upload stays disabled until both exist.
+        // name/EDC prefilled — upload stays disabled until both exist.
       })
       .finally(() => {
         if (!cancelled) setLinkContextReady(true)
@@ -90,7 +101,7 @@ export function FileProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [pathname])
 
   return (
     <FileProviderContext.Provider
@@ -107,8 +118,8 @@ export function FileProvider({ children }: { children: ReactNode }) {
         setIsUploading,
         name,
         setName,
-        ageWeeks,
-        setAgeWeeks,
+        edc,
+        setEdc,
         linkContextReady,
         hasFileSelected,
       }}

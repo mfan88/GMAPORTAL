@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
                 usedAt: link.usedAt,
                 state: link.state,
                 childName: link.childName,
-                ageWeeks: link.ageWeeks,
+                edc: link.edc,
                 url: `${origin}/portalaccess/${link.token}`,
             })),
         })

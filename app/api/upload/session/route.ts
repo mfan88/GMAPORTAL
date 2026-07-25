@@ -3,17 +3,18 @@ import { NextResponse } from "next/server"
 import {
     assertValidUploadSize,
     createOneDriveUploadSession,
-    sanitizeUploadFilename,
     getAppConfig,
     getOneDriveAccessToken,
     canAccessUploadPortal,
+    resolvePortalUploadFilename,
     toRequestShape,
 } from "@/lib/server"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(request: NextRequest) {
-    const access = await canAccessUploadPortal(toRequestShape(request))
+    const shaped = toRequestShape(request)
+    const access = await canAccessUploadPortal(shaped)
     if (!access.allowed) {
         return NextResponse.json(
             {
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
         const body = (await request.json()) as {
             filename?: string
             fileSize?: number
+            dateRecorded?: string
         }
 
         if (typeof body.filename !== "string") {
@@ -35,8 +37,18 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             )
         }
+        if (typeof body.dateRecorded !== "string" || !body.dateRecorded.trim()) {
+            return NextResponse.json(
+                { error: "Date recorded is required" },
+                { status: 400 }
+            )
+        }
 
-        const filename = sanitizeUploadFilename(body.filename)
+        const filename = await resolvePortalUploadFilename(
+            shaped,
+            body.dateRecorded,
+            body.filename
+        )
         await assertValidUploadSize(Number(body.fileSize))
 
         const accessToken = await getOneDriveAccessToken()
@@ -47,6 +59,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             ...session,
+            filename,
             uploadChunkSizeBytes: config.fileDetails.uploadChunkSizeBytes,
         })
     } catch (error) {

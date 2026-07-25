@@ -22,13 +22,12 @@ export async function POST(request: NextRequest) {
     try {
         const body = (await request.json()) as {
             childName?: string
-            ageWeeks?: number
+            edc?: string
         }
 
         const childName =
             typeof body.childName === "string" ? body.childName.trim() : ""
-        const ageWeeks =
-            typeof body.ageWeeks === "number" ? body.ageWeeks : Number.NaN
+        const edc = typeof body.edc === "string" ? body.edc.trim() : ""
 
         if (!childName) {
             return NextResponse.json(
@@ -36,7 +35,7 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             )
         }
-        if (!Number.isFinite(ageWeeks) || ageWeeks < 0) {
+        if (!edc) {
             return NextResponse.json(
                 {
                     error:
@@ -46,11 +45,11 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        const [{ token, createdAt, childName: storedName, ageWeeks: storedAge }, config] =
+        const [{ token, createdAt, childName: storedName, edc: storedEdc }, config] =
             await Promise.all([
                 createUploadLink({
                     childName,
-                    ageWeeks: Math.floor(ageWeeks),
+                    edc,
                 }),
                 getAppConfig(),
             ])
@@ -62,7 +61,7 @@ export async function POST(request: NextRequest) {
             url,
             createdAt,
             childName: storedName,
-            ageWeeks: storedAge,
+            edc: storedEdc,
             expiresInSeconds: linkExpirySeconds(config),
         })
     } catch (error) {

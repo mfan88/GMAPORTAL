@@ -10,8 +10,8 @@ import {
 export const dynamic = "force-dynamic"
 
 /**
- * Returns the child name + age bound to the caller's portal-access cookie,
- * so the upload UI can apply the admin-assigned naming scheme.
+ * Returns the child name + EDC bound to the caller's portal-access cookie.
+ * Age in weeks is computed client-side from EDC → date recorded at upload.
  */
 export async function GET(request: NextRequest) {
   const shaped = toRequestShape(request)
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   if (!token) {
     return NextResponse.json({
       childName: null,
-      ageWeeks: null,
+      edc: null,
       fromLink: false,
     })
   }
@@ -33,14 +33,14 @@ export async function GET(request: NextRequest) {
   if (!link || link.state === "used") {
     return NextResponse.json({
       childName: null,
-      ageWeeks: null,
+      edc: null,
       fromLink: false,
     })
   }
 
   return NextResponse.json({
     childName: link.childName,
-    ageWeeks: link.ageWeeks,
+    edc: link.edc,
     fromLink: true,
   })
 }

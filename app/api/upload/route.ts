@@ -4,13 +4,15 @@ import {
     uploadSmallFileToOneDrive,
     getOneDriveAccessToken,
     canAccessUploadPortal,
+    resolvePortalUploadFilename,
     toRequestShape,
 } from "@/lib/server"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(request: NextRequest) {
-    const access = await canAccessUploadPortal(toRequestShape(request))
+    const shaped = toRequestShape(request)
+    const access = await canAccessUploadPortal(shaped)
     if (!access.allowed) {
         return NextResponse.json(
             {
@@ -23,6 +25,7 @@ export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData()
         const file = formData.get("file")
+        const dateRecorded = formData.get("dateRecorded")
 
         if (!(file instanceof File)) {
             return NextResponse.json(
@@ -30,9 +33,25 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             )
         }
+        if (typeof dateRecorded !== "string" || !dateRecorded.trim()) {
+            return NextResponse.json(
+                { error: "Date recorded is required" },
+                { status: 400 }
+            )
+        }
+
+        const filename = await resolvePortalUploadFilename(
+            shaped,
+            dateRecorded,
+            file.name
+        )
+        const namedFile = new File([file], filename, {
+            type: file.type,
+            lastModified: file.lastModified,
+        })
 
         const accessToken = await getOneDriveAccessToken()
-        const result = await uploadSmallFileToOneDrive(file, accessToken)
+        const result = await uploadSmallFileToOneDrive(namedFile, accessToken)
 
         return NextResponse.json(result)
     } catch (error) {

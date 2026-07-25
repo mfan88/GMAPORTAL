@@ -27,6 +27,11 @@ import {
   bufferTimeSeconds,
   linkExpirySeconds,
 } from "@/lib/appConfig"
+import { weeksFromEdcToDate } from "@/lib/age"
+import {
+  buildUploadFilename,
+  parseRecordedDate,
+} from "@/lib/uploadFilename"
 
 export type { AppConfig, OneDriveUploadResult, OneDriveUploadSession }
 export { DEFAULT_APP_CONFIG, bufferTimeSeconds, linkExpirySeconds }
@@ -260,13 +265,16 @@ export type UploadLink = {
   usedAt: number | null
   state: LinkState
   childName: string | null
-  ageWeeks: number | null
+  /** ISO date (YYYY-MM-DD) used to compute age at upload from date recorded. */
+  edc: string | null
 }
 
 type StoredLink = {
   createdAt: number
   usedAt?: number
   childName?: string
+  edc?: string
+  /** @deprecated Older links stored age at generation; prefer `edc`. */
   ageWeeks?: number
 }
 
@@ -276,6 +284,21 @@ function deriveState(value: StoredLink, bufferTimeMs: number): LinkState {
     return "provisioning"
   }
   return "pending"
+}
+
+function parseStoredEdc(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  // Prefer normalizing to YYYY-MM-DD when parseable.
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+  if (isoMatch) return trimmed
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return trimmed
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, "0")
+  const day = String(parsed.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function toUploadLink(
@@ -292,23 +315,21 @@ function toUploadLink(
       typeof value.childName === "string" && value.childName.trim()
         ? value.childName.trim()
         : null,
-    ageWeeks:
-      typeof value.ageWeeks === "number" && Number.isFinite(value.ageWeeks)
-        ? Math.max(0, Math.floor(value.ageWeeks))
-        : null,
+    edc: parseStoredEdc(value.edc),
   }
 }
 
 export async function createUploadLink(input: {
   childName: string
-  ageWeeks: number
+  edc: string
 }): Promise<UploadLink> {
   const childName = input.childName.trim()
+  const edc = parseStoredEdc(input.edc)
   if (!childName) {
     throw new Error("A child name is required to generate a link.")
   }
-  if (!Number.isFinite(input.ageWeeks) || input.ageWeeks < 0) {
-    throw new Error("A valid age in weeks is required to generate a link.")
+  if (!edc) {
+    throw new Error("A valid EDC date is required to generate a link.")
   }
 
   const config = await getAppConfig()
@@ -317,7 +338,7 @@ export async function createUploadLink(input: {
   const value: StoredLink = {
     createdAt,
     childName,
-    ageWeeks: Math.floor(input.ageWeeks),
+    edc,
   }
 
   await getRedis().set(`${LINK_PREFIX}${token}`, value, {
@@ -422,6 +443,7 @@ export async function consumeUploadLink(token: string): Promise<boolean> {
     createdAt: value.createdAt,
     usedAt: Date.now(),
     childName: value.childName,
+    edc: value.edc,
     ageWeeks: value.ageWeeks,
   }
   await redis.set(key, updated)
@@ -1283,6 +1305,53 @@ export function sanitizeUploadFilename(filename: string) {
     throw new Error("A valid filename is required.")
   }
   return base
+}
+
+/**
+ * Build the OneDrive filename from the portal link's child name + EDC and the
+ * parent-selected date recorded. Age is weeks from EDC → date recorded.
+ */
+export async function resolvePortalUploadFilename(
+  req: { headers: { cookie?: string } },
+  dateRecordedRaw: string,
+  originalFilename: string
+): Promise<string> {
+  const token = getPortalAccessTokenFromRequest(req)
+  if (!token) {
+    throw new Error(
+      "A parent upload link is required before a file can be named and uploaded."
+    )
+  }
+
+  const link = await getUploadLink(token)
+  if (!link || link.state === "used") {
+    throw new Error("This upload link is no longer valid.")
+  }
+  if (!link.childName) {
+    throw new Error("This upload link is missing a child name.")
+  }
+  if (!link.edc) {
+    throw new Error(
+      "This upload link is missing an EDC date. Ask the clinic for a new link."
+    )
+  }
+
+  const dateRecorded = parseRecordedDate(dateRecordedRaw)
+  if (!dateRecorded) {
+    throw new Error("A valid date recorded is required.")
+  }
+
+  const ageWeeks = weeksFromEdcToDate(link.edc, dateRecorded)
+  if (ageWeeks === null) {
+    throw new Error("Could not calculate age from EDC and the date recorded.")
+  }
+
+  return buildUploadFilename(
+    sanitizeUploadFilename(originalFilename),
+    dateRecorded,
+    link.childName,
+    ageWeeks
+  )
 }
 
 export async function assertValidUploadSize(fileSize: number) {

@@ -7,61 +7,7 @@ import {
   MAX_SIMPLE_UPLOAD_BYTES,
   UPLOAD_CHUNK_BYTES,
 } from "@/lib/appConfig"
-
-// ---------------------------------------------------------------------------
-// Filename helpers
-// ---------------------------------------------------------------------------
-
-function getFileExtension(filename: string) {
-  const lastDot = filename.lastIndexOf(".")
-  if (lastDot <= 0) return ""
-  return filename.slice(lastDot)
-}
-
-export function formatDateTaken(date: Date) {
-  const day = String(date.getDate()).padStart(2, "0")
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const year = date.getFullYear()
-  return `${day}.${month}.${year}`
-}
-
-function sanitizeNameForFilename(name: string) {
-  return name
-    .trim()
-    .replace(/[/\\?%*:|"<>]/g, "")
-    .replace(/\s+/g, " ")
-}
-
-/**
- * Naming scheme: `GMA Video Full Name TodayDate_Age.ext`
- * e.g. `GMA Video Marcus Fan 24.07.2026_12.mp4`
- */
-export function buildUploadFilename(
-  originalName: string,
-  dateTaken: Date,
-  name: string,
-  ageWeeks: number
-) {
-  const fullName = sanitizeNameForFilename(name) || "Unknown"
-  const age = Math.max(0, Math.floor(ageWeeks))
-  return `GMA Video ${fullName} ${formatDateTaken(dateTaken)}_${age}${getFileExtension(originalName)}`
-}
-
-export function renameFileForUpload(
-  file: File,
-  dateTaken: Date,
-  name: string,
-  ageWeeks: number
-) {
-  return new File(
-    [file],
-    buildUploadFilename(file.name, dateTaken, name, ageWeeks),
-    {
-      type: file.type,
-      lastModified: file.lastModified,
-    }
-  )
-}
+import { formatRecordedDateForApi } from "@/lib/uploadFilename"
 
 // ---------------------------------------------------------------------------
 // Live upload progress
@@ -161,9 +107,13 @@ async function uploadViaSession(
   throw new Error("Upload finished without receiving a file response.")
 }
 
-async function uploadViaApiRoute(file: File): Promise<OneDriveUploadResult> {
+async function uploadViaApiRoute(
+  file: File,
+  dateRecorded: string
+): Promise<OneDriveUploadResult> {
   const formData = new FormData()
   formData.append("file", file)
+  formData.append("dateRecorded", dateRecorded)
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -254,26 +204,25 @@ async function getLiveUploadLimits() {
 
 export async function uploadFileToOneDrive(
   file: File,
-  dateTaken: Date,
-  name: string,
-  ageWeeks: number
+  dateTaken: Date
 ): Promise<OneDriveUploadResult> {
   setLiveUploadPercent(0)
-  const uploadFile = renameFileForUpload(file, dateTaken, name, ageWeeks)
+  const dateRecorded = formatRecordedDateForApi(dateTaken)
   const limits = await getLiveUploadLimits()
 
   try {
     let result: OneDriveUploadResult
 
-    if (uploadFile.size <= limits.maxSimpleFileSizeBytes) {
-      result = await uploadViaApiRoute(uploadFile)
+    if (file.size <= limits.maxSimpleFileSizeBytes) {
+      result = await uploadViaApiRoute(file, dateRecorded)
     } else {
       const sessionResponse = await fetch("/api/upload/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          filename: uploadFile.name,
-          fileSize: uploadFile.size,
+          filename: file.name,
+          fileSize: file.size,
+          dateRecorded,
         }),
       })
 
@@ -291,7 +240,7 @@ export async function uploadFileToOneDrive(
 
       const session = sessionPayload as UploadSessionResponse
       result = await uploadViaSession(
-        uploadFile,
+        file,
         session.uploadUrl,
         session.uploadChunkSizeBytes ?? limits.uploadChunkSizeBytes
       )

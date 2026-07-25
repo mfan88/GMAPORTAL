@@ -36,7 +36,7 @@ type UploadLink = {
     usedAt: number | null
     state: LinkState
     childName: string | null
-    ageWeeks: number | null
+    edc: string | null
 }
 
 const STATE_BADGE: Record<LinkState, { label: string; dot: string }> = {
@@ -70,15 +70,6 @@ function LinkStatusBadge({
 type ReferenceChild = {
     name: string
     edc: string | null
-}
-
-const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000
-
-function weeksOldFromEdc(edc: string | null): number | null {
-    if (!edc) return null
-    const edcDate = new Date(`${edc}T00:00:00`)
-    if (Number.isNaN(edcDate.getTime())) return null
-    return Math.floor((Date.now() - edcDate.getTime()) / MS_PER_WEEK)
 }
 
 export default function ConsolePage() {
@@ -285,16 +276,14 @@ export default function ConsolePage() {
 
     const selectedChildRecord =
         children.find((child) => child.name === selectedChild) ?? null
-    const selectedWeeksOld = selectedChildRecord
-        ? weeksOldFromEdc(selectedChildRecord.edc)
-        : null
-    const ageStatement =
-        selectedChild && selectedWeeksOld !== null
-            ? `According to the provided data, ${selectedChild} is ${Math.max(0, selectedWeeksOld)} weeks old.`
+    const selectedEdc = selectedChildRecord?.edc ?? null
+    const edcStatement =
+        selectedChild && selectedEdc
+            ? `EDC on file for ${selectedChild}: ${selectedEdc}. Age in weeks will be calculated from this EDC to the date the parent records on upload.`
             : null
 
     const generateLink = useCallback(() => {
-        if (!selectedChild || selectedWeeksOld === null) {
+        if (!selectedChild || !selectedEdc) {
             setBanner({
                 type: "error",
                 message:
@@ -310,7 +299,7 @@ export default function ConsolePage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 childName: selectedChild,
-                ageWeeks: Math.max(0, selectedWeeksOld),
+                edc: selectedEdc,
             }),
         })
             .then(async (res) => {
@@ -330,12 +319,12 @@ export default function ConsolePage() {
                 setBanner({ type: "error", message })
             })
             .finally(() => setIsGenerating(false))
-    }, [loadLinks, selectedChild, selectedWeeksOld])
+    }, [loadLinks, selectedChild, selectedEdc])
 
     const canGenerateLink =
         connected &&
         Boolean(selectedChild) &&
-        selectedWeeksOld !== null &&
+        Boolean(selectedEdc) &&
         !isGenerating
 
     const childPickerContent = (() => {
@@ -388,8 +377,8 @@ export default function ConsolePage() {
                         </SelectGroup>
                     </SelectContent>
                 </Select>
-                {ageStatement && (
-                    <p className="text-sm text-black/80">{ageStatement}</p>
+                {edcStatement && (
+                    <p className="text-sm text-black/80">{edcStatement}</p>
                 )}
             </>
         )
@@ -532,9 +521,8 @@ export default function ConsolePage() {
                                                 {link.childName && (
                                                     <span className="text-xs text-black/55">
                                                         {link.childName}
-                                                        {typeof link.ageWeeks ===
-                                                        "number"
-                                                            ? ` · ${link.ageWeeks}w`
+                                                        {link.edc
+                                                            ? ` · EDC ${link.edc}`
                                                             : ""}
                                                     </span>
                                                 )}

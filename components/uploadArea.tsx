@@ -30,28 +30,18 @@ export default function UploadArea({
     setIsUploading,
     uploadResult,
     name,
-    ageWeeks,
+    edc,
     hasFileSelected,
   } = useFileProviderContext()
 
   const runUpload = useCallback(
-    async (
-      file: File,
-      dateTaken: Date,
-      childName: string,
-      weeks: number
-    ) => {
+    async (file: File, dateTaken: Date) => {
       setUploadError(null)
       setUploadResult(null)
       setIsUploading(true)
 
       try {
-        const result = await uploadFileToOneDrive(
-          file,
-          dateTaken,
-          childName,
-          weeks
-        )
+        const result = await uploadFileToOneDrive(file, dateTaken)
         setUploadResult(result)
       } catch (error) {
         const message =
@@ -69,7 +59,7 @@ export default function UploadArea({
     Boolean(files?.file) &&
     Boolean(date) &&
     Boolean(name.trim()) &&
-    typeof ageWeeks === "number"
+    Boolean(edc)
 
   const { getRootProps, getInputProps } = useDropzone({
     accept: ACCEPTED_UPLOAD_TYPES,
@@ -138,10 +128,8 @@ export default function UploadArea({
           variant="outline"
           disabled={!canUpload}
           onClick={() => {
-            if (!files?.file || !date || !name.trim() || typeof ageWeeks !== "number") {
-              return
-            }
-            void runUpload(files.file, date, name, ageWeeks)
+            if (!files?.file || !date) return
+            void runUpload(files.file, date)
           }}
         >
           Upload
