@@ -267,6 +267,10 @@ export type UploadLink = {
   childName: string | null
   /** ISO date (YYYY-MM-DD) used to compute age at upload from date recorded. */
   edc: string | null
+  /** Earliest time the parent may upload (createdAt + buffer). */
+  availableAt: number
+  /** Latest time the parent may upload (set when the link is created). */
+  expiresAt: number
 }
 
 type StoredLink = {
@@ -274,6 +278,8 @@ type StoredLink = {
   usedAt?: number
   childName?: string
   edc?: string
+  /** Absolute expiry timestamp (ms). Older links may omit this. */
+  expiresAt?: number
   /** @deprecated Older links stored age at generation; prefer `edc`. */
   ageWeeks?: number
 }
@@ -304,8 +310,14 @@ function parseStoredEdc(value: unknown): string | null {
 function toUploadLink(
   token: string,
   value: StoredLink,
-  bufferTimeMs: number
+  bufferTimeMs: number,
+  linkExpiryTimeMs: number
 ): UploadLink {
+  const expiresAt =
+    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
+      ? value.expiresAt
+      : value.createdAt + linkExpiryTimeMs
+
   return {
     token,
     createdAt: value.createdAt,
@@ -316,6 +328,8 @@ function toUploadLink(
         ? value.childName.trim()
         : null,
     edc: parseStoredEdc(value.edc),
+    availableAt: value.createdAt + bufferTimeMs,
+    expiresAt,
   }
 }
 
@@ -339,18 +353,24 @@ export async function createUploadLink(input: {
     createdAt,
     childName,
     edc,
+    expiresAt: createdAt + config.linkExpiryTimeMs,
   }
 
   await getRedis().set(`${LINK_PREFIX}${token}`, value, {
     ex: linkExpirySeconds(config),
   })
 
-  return toUploadLink(token, value, config.bufferTimeMs)
+  return toUploadLink(
+    token,
+    value,
+    config.bufferTimeMs,
+    config.linkExpiryTimeMs
+  )
 }
 
 export async function listLinks(): Promise<UploadLink[]> {
   const redis = getRedis()
-  const { bufferTimeMs } = await getAppConfig()
+  const { bufferTimeMs, linkExpiryTimeMs } = await getAppConfig()
 
   const tokens: string[] = []
   let cursor = "0"
@@ -375,7 +395,7 @@ export async function listLinks(): Promise<UploadLink[]> {
   tokens.forEach((token, index) => {
     const value = values[index]
     if (value && typeof value.createdAt === "number") {
-      links.push(toUploadLink(token, value, bufferTimeMs))
+      links.push(toUploadLink(token, value, bufferTimeMs, linkExpiryTimeMs))
     }
   })
 
@@ -413,8 +433,8 @@ export async function checkUploadLink(token: string): Promise<LinkStatus> {
 export async function getUploadLink(token: string): Promise<UploadLink | null> {
   const value = await getRedis().get<StoredLink>(`${LINK_PREFIX}${token}`)
   if (!value || typeof value.createdAt !== "number") return null
-  const { bufferTimeMs } = await getAppConfig()
-  return toUploadLink(token, value, bufferTimeMs)
+  const { bufferTimeMs, linkExpiryTimeMs } = await getAppConfig()
+  return toUploadLink(token, value, bufferTimeMs, linkExpiryTimeMs)
 }
 
 export async function uploadLinkUsable(token: string): Promise<boolean> {
@@ -444,6 +464,7 @@ export async function consumeUploadLink(token: string): Promise<boolean> {
     usedAt: Date.now(),
     childName: value.childName,
     edc: value.edc,
+    expiresAt: value.expiresAt,
     ageWeeks: value.ageWeeks,
   }
   await redis.set(key, updated)

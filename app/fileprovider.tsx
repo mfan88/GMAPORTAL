@@ -17,6 +17,11 @@ export interface UploadFile {
   previewUrl: string
 }
 
+export type UploadWindow = {
+  availableAt: number
+  expiresAt: number
+}
+
 export interface FileProviderContextType {
   files: UploadFile | null
   setFiles: Dispatch<SetStateAction<UploadFile | null>>
@@ -33,6 +38,8 @@ export interface FileProviderContextType {
   /** ISO EDC from the portal link; age is derived from this + date recorded. */
   edc: string | null
   setEdc: Dispatch<SetStateAction<string | null>>
+  /** Parent upload window from the portal link, when present. */
+  uploadWindow: UploadWindow | null
   linkContextReady: boolean
   hasFileSelected: boolean
 }
@@ -61,6 +68,7 @@ export function FileProvider({ children }: { children: ReactNode }) {
   const [isUploading, setIsUploading] = useState(false)
   const [name, setName] = useState("")
   const [edc, setEdc] = useState<string | null>(null)
+  const [uploadWindow, setUploadWindow] = useState<UploadWindow | null>(null)
   const [linkContextReady, setLinkContextReady] = useState(false)
   const hasFileSelected = files !== null
 
@@ -80,6 +88,8 @@ export function FileProvider({ children }: { children: ReactNode }) {
         const data = (await res.json()) as {
           childName?: string | null
           edc?: string | null
+          availableAt?: number | null
+          expiresAt?: number | null
           error?: string
         }
         if (!res.ok || cancelled) return
@@ -88,6 +98,17 @@ export function FileProvider({ children }: { children: ReactNode }) {
         }
         if (typeof data.edc === "string" && data.edc.trim()) {
           setEdc(data.edc.trim())
+        }
+        if (
+          typeof data.availableAt === "number" &&
+          Number.isFinite(data.availableAt) &&
+          typeof data.expiresAt === "number" &&
+          Number.isFinite(data.expiresAt)
+        ) {
+          setUploadWindow({
+            availableAt: data.availableAt,
+            expiresAt: data.expiresAt,
+          })
         }
       })
       .catch(() => {
@@ -120,6 +141,7 @@ export function FileProvider({ children }: { children: ReactNode }) {
         setName,
         edc,
         setEdc,
+        uploadWindow,
         linkContextReady,
         hasFileSelected,
       }}

@@ -99,7 +99,6 @@ export default function SettingsCard({
   }, [connected, onBanner])
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
       const configRes = await fetch("/api/config")
       const config = (await configRes.json()) as AppConfig & { error?: string }
@@ -121,7 +120,19 @@ export default function SettingsCard({
   }, [loadBrowse, onBanner])
 
   useEffect(() => {
-    void load()
+    let cancelled = false
+
+    void (async () => {
+      // Yield so setLoading is not synchronous inside the effect body.
+      await Promise.resolve()
+      if (cancelled) return
+      setLoading(true)
+      await load()
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [load])
 
   const folderItems = useMemo(() => {
@@ -134,7 +145,7 @@ export default function SettingsCard({
       label: folder.name,
       value: folder.name,
     }))
-  }, [folders, form?.folderName])
+  }, [folders, form])
 
   const workbookItems = useMemo(() => {
     const names = new Set(workbooks.map((file) => file.name))
@@ -147,7 +158,7 @@ export default function SettingsCard({
       label: file.name,
       value: file.name,
     }))
-  }, [workbooks, form?.referenceSheetName])
+  }, [workbooks, form])
 
   const cancel = () => {
     if (saved) setForm(saved)
@@ -409,9 +420,8 @@ export default function SettingsCard({
             />
             <p className="text-xs text-black/45">
               One Microsoft account email per line. These accounts can open
-              /setup. The receiving OneDrive account must also be listed here
-              before you connect or change it. You can also seed this with
-              ALLOWED_ADMIN_EMAILS.
+              this admin console. The receiving OneDrive account must also be listed here
+              before you connect or change it.
             </p>
           </div>
         </div>
