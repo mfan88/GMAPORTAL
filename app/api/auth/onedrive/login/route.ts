@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import {
     getOneDriveLoginUrl,
     authFlowCookieHeader,
+    clearOneDriveConnection,
     createPkcePair,
     hasValidAdminAccess,
     pkceCookieHeader,
@@ -20,6 +21,10 @@ export async function GET(request: NextRequest) {
     }
 
     try {
+        // Start "Change receiving OneDrive" from a clean slate so the upcoming
+        // Microsoft account is the only one stored after callback.
+        await clearOneDriveConnection()
+
         const { verifier, challenge } = createPkcePair()
         const loginUrl = await getOneDriveLoginUrl(
             challenge,

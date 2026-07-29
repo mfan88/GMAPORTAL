@@ -469,8 +469,11 @@ export default function ConsolePage() {
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 size="sm"
-                nativeButton={false}
-                render={<a href="/api/auth/onedrive/login" />}
+                onClick={() => {
+                  // Hard navigation avoids client fetch/abort noise and ensures
+                  // Set-Cookie + OAuth redirect are handled as a full document load.
+                  window.location.assign("/api/auth/onedrive/login")
+                }}
               >
                 {connected
                   ? "Change receiving OneDrive"

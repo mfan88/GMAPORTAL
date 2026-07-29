@@ -55,6 +55,16 @@ function formToConfigPatch(form: SettingsForm) {
   }
 }
 
+function isBenignFetchInterruption(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return true
+  if (!(error instanceof Error)) return false
+  return (
+    error.name === "AbortError" ||
+    error.message === "Failed to fetch" ||
+    /aborted|networkerror/i.test(error.message)
+  )
+}
+
 export default function SettingsCard({
   connected,
   onBanner,
@@ -92,6 +102,8 @@ export default function SettingsCard({
       setFolders(browse.folders ?? [])
       setWorkbooks(browse.workbooks ?? [])
     } catch (error) {
+      // Navigating to Microsoft OAuth aborts in-flight fetches; don't flash a banner.
+      if (isBenignFetchInterruption(error)) return
       const message =
         error instanceof Error ? error.message : "Could not load OneDrive items"
       onBanner({ type: "error", message })
@@ -111,6 +123,7 @@ export default function SettingsCard({
       setSaved(nextForm)
       await loadBrowse()
     } catch (error) {
+      if (isBenignFetchInterruption(error)) return
       const message =
         error instanceof Error ? error.message : "Could not load settings"
       onBanner({ type: "error", message })

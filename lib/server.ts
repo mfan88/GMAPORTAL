@@ -1008,7 +1008,27 @@ export async function completeOneDriveLogin(
     scopes: [...graphScopes],
     redirectUri: getOneDriveRedirectUri(req),
   }
-  return client.acquireTokenByCode(request)
+  const result = await client.acquireTokenByCode(request)
+  const signedIn = result.account
+  if (!signedIn?.homeAccountId) {
+    return result
+  }
+
+  // Keep only the account that just signed in. A stale cache reload can leave the
+  // previous receiving mailbox in memory and getConnectedOneDriveAccount() would
+  // keep returning that older accounts[0].
+  const cache = client.getTokenCache() as {
+    getAllAccounts: () => Promise<AccountInfo[]>
+    removeAccount: (account: AccountInfo) => Promise<void>
+    serialize: () => string
+  }
+  for (const account of await cache.getAllAccounts()) {
+    if (account.homeAccountId !== signedIn.homeAccountId) {
+      await cache.removeAccount(account)
+    }
+  }
+  await writeTokenCache(cache.serialize())
+  return result
 }
 
 export async function getOneDriveAccessToken() {
