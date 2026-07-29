@@ -33,6 +33,7 @@ export default function UploadAccessDeniedPage() {
         if (error === "wrong_account") {
             const signedIn = params.get("signedIn")
             const expected = params.get("expected")
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setDetail(
                 `${errorMessages.wrong_account} You used ${signedIn ?? "unknown"}, but the receiving account is ${expected ?? "unknown"}.`
             )

@@ -67,7 +67,7 @@ export default async function LinkExpiredPage({
                     This upload link has expired or was already used
                 </AlertTitle>
                 <AlertDescription>
-                    Ask your clinic for a new parent upload link. Each link
+                    If you believe this is an error, please request for a new upload link. Each link
                     works once and is valid for {expiryHours} hours.
                 </AlertDescription>
             </Alert>
