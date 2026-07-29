@@ -108,8 +108,8 @@ export default function UploadArea({
         {...props}
       >
         {hasFileSelected ? (
-          <div className="flex items-center justify-center">
-            <FileDisplay className="gap-0" file={files} />
+          <div className="flex w-full items-center justify-center px-4">
+            <FileDisplay className="w-full max-w-full gap-0" file={files} />
           </div>
         ) : (
           <>

@@ -79,7 +79,7 @@ export default function FileDisplay({
       size="default"
       state={state}
       className={cn(
-        "w-[50%] max-w-[50%] min-w-0 flex-nowrap overflow-hidden",
+        "min-w-0 flex-nowrap overflow-hidden",
         className
       )}
     >
