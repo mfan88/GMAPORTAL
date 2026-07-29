@@ -982,6 +982,8 @@ export async function getOneDriveLoginUrl(
   const request: AuthorizationUrlRequest = {
     scopes: [...graphScopes],
     redirectUri: getOneDriveRedirectUri(req),
+    // Force the account picker so "Change receiving OneDrive" does not silently
+    // reuse the previously signed-in Microsoft session.
     prompt: "select_account",
     codeChallenge,
     codeChallengeMethod: "S256",
@@ -1927,6 +1929,11 @@ async function completeSetupFlow(
   if (!(await isAllowedAdminEmail(actingAdmin))) {
     return errorRedirect(request, "setup", "unauthorized_admin")
   }
+
+  // Drop any previously cached receiving account first. Otherwise MSAL keeps the
+  // old account in the cache and getConnectedOneDriveAccount() keeps returning
+  // accounts[0] (often the previous mailbox) even after a successful new sign-in.
+  await clearOneDriveConnection()
 
   const result = await completeOneDriveLogin(code, codeVerifier, shaped)
   const receivingEmail = result.account?.username
