@@ -1,4 +1,5 @@
 "use client"
+
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -9,7 +10,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover"
 import { format } from "date-fns"
-import { Dispatch, SetStateAction } from "react"
+import { useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react"
 
 interface DateProps {
   date: Date | undefined
@@ -17,16 +18,32 @@ interface DateProps {
   className?: string
 }
 
+function toDateInputValue(date: Date | undefined) {
+  if (!date) return ""
+  return format(date, "yyyy-MM-dd")
+}
+
+function parseDateInputValue(value: string): Date | undefined {
+  if (!value) return undefined
+  const [year, month, day] = value.split("-").map(Number)
+  if (!year || !month || !day) return undefined
+  const next = new Date(year, month - 1, day)
+  return Number.isNaN(next.getTime()) ? undefined : next
+}
+
 export default function DatePicker({
   className,
   date,
   setDate,
 }: Readonly<DateProps>) {
+  const [open, setOpen] = useState(false)
+
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           <Button
+            type="button"
             variant="outline"
             data-empty={!date}
             className={cn(
@@ -48,10 +65,40 @@ export default function DatePicker({
         <Calendar
           mode="single"
           selected={date}
-          onSelect={setDate}
+          onSelect={(next) => {
+            setDate(next)
+            setOpen(false)
+          }}
           defaultMonth={date}
         />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** Native date control — reliable on iOS/Android touch. */
+export function MobileDatePicker({
+  className,
+  date,
+  setDate,
+}: Readonly<DateProps>) {
+  const onChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setDate(parseDateInputValue(event.target.value))
+  }
+
+  return (
+    <div className={cn("relative w-full", className)}>
+      {/* Keep native appearance — appearance-none breaks iOS Safari date UI. */}
+      <input
+        type="date"
+        value={toDateInputValue(date)}
+        onChange={onChange}
+        className={cn(
+          "box-border h-11 w-full touch-manipulation rounded-md border border-gray-500 bg-white px-3 py-2 text-base text-black shadow-xs outline-none",
+          "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+          !date && "text-muted-foreground"
+        )}
+      />
+    </div>
   )
 }

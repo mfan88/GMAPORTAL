@@ -1,12 +1,11 @@
 "use client"
-import InfoGroup from "@/components/infoGroup"
-import UploadArea from "@/components/uploadArea"
+import { InfoGroup, MobileInfoGroup } from "@/components/infoGroup"
+import { UploadArea, MobileUploadArea } from "@/components/uploadArea"
 import { useFileProviderContext } from "@/app/fileprovider"
 import { useTheme } from "next-themes"
 import { useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { CircleHelp } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { format } from "date-fns"
 
@@ -32,8 +31,8 @@ export default function Page() {
   }, [setTheme])
 
   return (
-    <div className="h-dvh max-w-dvw bg-white text-black">
-      <header className="box-border flex h-[10%] items-center justify-between px-4 py-2 dark:bg-white">
+    <div className="min-h-dvh max-w-dvw bg-white text-black">
+      <header className="box-border flex h-[10%] min-h-14 items-center justify-between px-4 py-2 dark:bg-white">
         <Image
           className="h-full w-auto"
           src="/images/dda-logo.svg"
@@ -43,6 +42,15 @@ export default function Page() {
           priority
         />
       </header>
+
+      <div className="flex justify-end px-4 pb-1 sm:hidden">
+        <Link
+          href="/setup"
+          className="rounded-md px-2 py-1 text-xs text-black/40 underline-offset-4"
+        >
+          Are you an admin?
+        </Link>
+      </div>
 
       {/* Desktop and Tablet View */}
       <div className="flex hidden h-auto w-full flex-col gap-5 bg-white p-6 text-black select-none sm:block">
@@ -79,7 +87,7 @@ export default function Page() {
       </div>
 
       {/* Mobile View */}
-      <div className="h-auto w-dvw bg-white sm:hidden">
+      <div className="h-auto w-dvw bg-white pb-[calc(6rem+env(safe-area-inset-bottom,0px))] sm:hidden">
         <section className="box-border flex h-auto justify-center p-10">
           <h1 className="text-center font-medium text-black">
             General Movements Assessment (GMA) Video Portal for the Vancouver
@@ -88,18 +96,22 @@ export default function Page() {
         </section>
         <section className="flex h-auto w-full flex-col gap-1 px-10">
           <h2 className="font-medium">Instructions</h2>
-          <span className="text-md whitespace-pre-line">{InstructionsText()}</span>
-          <UploadArea className="mt-4 w-full border-0 bg-mobile-button px-4 py-8 text-center text-black" />
+          <span className="text-md whitespace-pre-line">
+            <InstructionsText />
+          </span>
+        </section>
+        <section className="mt-5 box-border w-full px-10">
+          <MobileInfoGroup />
+        </section>
+        <section className="mt-5 box-border w-full px-10">
+          <MobileUploadArea />
         </section>
 
-        <section className="mt-5 box-border px-10">
-          <InfoGroup />
-        </section>
       </div>
 
       <Link
         href="/setup"
-        className="fixed right-3 bottom-3 z-40 rounded-md px-2 py-1 text-xs text-black/40 underline-offset-4 transition-colors hover:text-black/80 hover:underline"
+        className="fixed right-3 bottom-3 z-40 hidden rounded-md px-2 py-1 text-xs text-black/40 underline-offset-4 transition-colors hover:text-black/80 hover:underline sm:block"
       >
         Are you an admin?
       </Link>

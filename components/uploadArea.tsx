@@ -1,3 +1,5 @@
+"use client"
+
 import { cn } from "@/lib/utils"
 import { useFileProviderContext } from "@/app/fileprovider"
 import { uploadFileToOneDrive } from "@/lib/upload"
@@ -8,18 +10,45 @@ import {
   formatMaxUploadSize,
 } from "@/lib/appConfig"
 import { Button } from "@/components/ui/button"
-import { useCallback } from "react"
+import { useCallback, type ChangeEvent } from "react"
 import { useDropzone } from "react-dropzone"
 import FileDisplay from "./fileDisplay"
+
+export { UploadArea, MobileUploadArea }
 
 interface UploadAreaProps {
   className?: string
 }
 
-export default function UploadArea({
-  className,
-  ...props
-}: Readonly<UploadAreaProps>) {
+function isLikelyVideoFile(file: File) {
+  if (file.type.startsWith("video/")) return true
+  if (file.type.startsWith("image/") || file.type.startsWith("audio/")) {
+    return false
+  }
+  // iOS Photos / Camera often returns an empty MIME type for .mov/.mp4.
+  if (/\.(mp4|m4v|mov|qt|webm|avi|mkv|3gp)$/i.test(file.name)) {
+    return true
+  }
+  // Camera roll picks can omit both MIME and a usable filename.
+  return !file.type && file.size > 0
+}
+
+/**
+ * Safari/iOS can invalidate the File from <input> after the change handler
+ * returns (especially if value is cleared). Snapshot into a new File first.
+ */
+function snapshotFile(file: File): File {
+  const name = file.name?.trim()
+    ? file.name
+    : `video-${Date.now()}.mov`
+  const type = file.type || "video/quicktime"
+  return new File([file], name, {
+    type,
+    lastModified: file.lastModified || Date.now(),
+  })
+}
+
+function useUploadActions() {
   const {
     files,
     setFiles,
@@ -28,6 +57,7 @@ export default function UploadArea({
     date,
     isUploading,
     setIsUploading,
+    uploadError,
     uploadResult,
     name,
     edc,
@@ -55,11 +85,71 @@ export default function UploadArea({
     [setIsUploading, setUploadError, setUploadResult]
   )
 
+  const registerSelectedFile = useCallback(
+    (file: File | null | undefined) => {
+      if (!file) return false
+
+      if (!isLikelyVideoFile(file)) {
+        setUploadError("Only video files are supported.")
+        return false
+      }
+      if (file.size <= 0) {
+        setUploadError(
+          "Could not read that video. If it is in iCloud, download it on this phone and try again."
+        )
+        return false
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        setUploadError(`Files must be ${formatMaxUploadSize()} or smaller.`)
+        return false
+      }
+
+      setUploadError(null)
+      setUploadResult(null)
+      setFiles({
+        file,
+        previewUrl: URL.createObjectURL(file),
+      })
+      return true
+    },
+    [setFiles, setUploadError, setUploadResult]
+  )
+
   const canUpload =
     Boolean(files?.file) &&
     Boolean(date) &&
     Boolean(name.trim()) &&
     Boolean(edc)
+
+  return {
+    files,
+    date,
+    isUploading,
+    uploadError,
+    uploadResult,
+    hasFileSelected,
+    canUpload,
+    runUpload,
+    registerSelectedFile,
+    setUploadError,
+  }
+}
+
+function UploadArea({
+  className,
+  ...props
+}: Readonly<UploadAreaProps>) {
+  const {
+    files,
+    date,
+    isUploading,
+    uploadResult,
+    hasFileSelected,
+    canUpload,
+    runUpload,
+    registerSelectedFile,
+    setUploadError,
+  } = useUploadActions()
 
   const { getRootProps, getInputProps } = useDropzone({
     accept: ACCEPTED_UPLOAD_TYPES,
@@ -69,15 +159,7 @@ export default function UploadArea({
     useFsAccessApi: false,
     disabled: hasFileSelected,
     onDrop: (acceptedFile) => {
-      const [newFile] = acceptedFile
-      if (!newFile) return
-
-      setUploadError(null)
-      setUploadResult(null)
-      setFiles({
-        file: newFile,
-        previewUrl: URL.createObjectURL(newFile),
-      })
+      registerSelectedFile(acceptedFile[0])
     },
     onDropRejected: (rejections) => {
       const rejection = rejections[0]
@@ -134,6 +216,103 @@ export default function UploadArea({
         >
           Upload
         </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Safari / iOS: a full-size transparent <input type="file"> over the control
+ * receives the tap. Do not use react-dropzone open(), programmatic click(),
+ * display:none / sr-only inputs, or clear input.value in the same turn as
+ * reading files.
+ */
+function MobileUploadArea({
+  className,
+}: Readonly<{ className?: string }>) {
+  const {
+    files,
+    date,
+    isUploading,
+    uploadError,
+    uploadResult,
+    hasFileSelected,
+    canUpload,
+    runUpload,
+    registerSelectedFile,
+  } = useUploadActions()
+
+  const onMobileFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget
+    const picked = input.files?.item(0)
+    if (!picked) return
+
+    const file = snapshotFile(picked)
+    registerSelectedFile(file)
+
+    // Clear later so the same asset can be re-picked — never in the same turn
+    // as reading the File (iOS Safari can drop the reference).
+    window.setTimeout(() => {
+      try {
+        input.value = ""
+      } catch {
+        // ignore
+      }
+    }, 0)
+  }
+
+  return (
+    <div className={cn("mt-4 flex w-full flex-col items-center gap-3", className)}>
+      {hasFileSelected ? (
+        <FileDisplay className="w-full max-w-full gap-0" file={files} />
+      ) : (
+        <div className="relative w-full touch-manipulation">
+          <div
+            className={cn(
+              "flex w-full items-center justify-center rounded-md border border-border bg-mobile-button px-2.5 py-8 text-base font-medium text-black shadow-xs",
+              isUploading && "opacity-50"
+            )}
+            aria-hidden
+          >
+            Add video
+          </div>
+          <input
+            type="file"
+            accept="video/*,video/mp4,video/quicktime,video/x-m4v,.mp4,.mov,.m4v"
+            // No capture — lets iOS offer Photo Library / Take Video / Files.
+            className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:pointer-events-none"
+            disabled={isUploading}
+            onChange={onMobileFileChange}
+            aria-label="Add video"
+          />
+        </div>
+      )}
+
+      {uploadError ? (
+        <p className="w-full text-center text-sm text-red-600">{uploadError}</p>
+      ) : null}
+
+      {hasFileSelected && !isUploading && !uploadResult ? (
+        <>
+          <Button
+            className={`w-full touch-manipulation ${canUpload ? "bg-blue" : "bg-none"}`}
+            variant="outline"
+            disabled={!canUpload}
+            onClick={() => {
+              if (!files?.file || !date) return
+              void runUpload(files.file, date)
+            }}
+          >
+            Upload
+          </Button>
+          {!canUpload ? (
+            <p className="w-full text-center text-sm text-muted-foreground">
+              {!date
+                ? "Pick the date recorded above to enable upload."
+                : "Open this page from your clinic link so child details can load."}
+            </p>
+          ) : null}
+        </>
       ) : null}
     </div>
   )

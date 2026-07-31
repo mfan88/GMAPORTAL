@@ -3,11 +3,19 @@ import {
     Instrument_Sans,
     Montserrat,
 } from "next/font/google"
+import type { Viewport } from "next"
 
 import "@/app/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 import { FileProvider } from "./fileprovider"
+
+export const viewport: Viewport = {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    viewportFit: "cover",
+}
 
 const montserratHeading = Montserrat({
     subsets: ["latin"],
