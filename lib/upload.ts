@@ -160,13 +160,23 @@ async function uploadViaApiRoute(
 }
 
 /**
- * Notifies the server that an upload finished successfully so it can consume the
- * single-use link and revoke the session. Best-effort: the file is already
- * safely uploaded at this point, so failures here are logged but not surfaced.
+ * Notifies the server that an upload finished successfully so it can email the
+ * clinic, consume the single-use link, and revoke the session. Best-effort: the
+ * file is already safely uploaded at this point, so failures here are logged
+ * but not surfaced.
  */
-async function finalizeUpload(): Promise<void> {
+async function finalizeUpload(
+  result: OneDriveUploadResult
+): Promise<void> {
   try {
-    await fetch("/api/upload/complete", { method: "POST" })
+    await fetch("/api/upload/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        webUrl: result.webUrl,
+        name: result.name,
+      }),
+    })
   } catch (error) {
     console.error("Failed to finalize upload:", error)
   }
@@ -246,7 +256,7 @@ export async function uploadFileToOneDrive(
       )
     }
 
-    await finalizeUpload()
+    await finalizeUpload(result)
     return result
   } catch (error) {
     setLiveUploadPercent(0)

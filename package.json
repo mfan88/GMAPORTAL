@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@azure/communication-email": "^1.1.0",
     "@azure/msal-browser": "^5.17.1",
     "@azure/msal-node": "^5.4.2",
     "@base-ui/react": "^1.6.0",

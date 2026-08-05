@@ -32,9 +32,9 @@ export default function Page() {
 
   return (
     <div className="min-h-dvh max-w-dvw bg-white text-black">
-      <header className="box-border flex h-[10%] min-h-14 items-center justify-between px-4 py-2 dark:bg-white">
+      <header className="box-border flex h-[10dvh] max-h-[10dvh] shrink-0 items-center justify-between overflow-hidden px-4 py-2 dark:bg-white">
         <Image
-          className="h-full w-auto"
+          className="h-full w-auto max-h-full object-contain"
           src="/images/dda-logo.svg"
           alt="DDA logo"
           width={1338}
