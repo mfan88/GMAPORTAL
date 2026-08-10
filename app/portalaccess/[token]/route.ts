@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import {
     checkUploadLink,
     createPortalAccessCookieHeader,
+    publicUrl,
 } from "@/lib/server"
 
 export const dynamic = "force-dynamic"
@@ -13,7 +14,7 @@ export async function GET(
 ) {
     const { token } = await ctx.params
     const redirectTo = (reason?: string, availableAt?: number) => {
-        const url = new URL("/link-expired", request.url)
+        const url = publicUrl("/link-expired", request)
         if (reason) url.searchParams.set("reason", reason)
         if (typeof availableAt === "number") {
             url.searchParams.set("availableAt", String(availableAt))
@@ -36,7 +37,7 @@ export async function GET(
             return redirectTo()
         }
 
-        const response = NextResponse.redirect(new URL("/", request.url), {
+        const response = NextResponse.redirect(publicUrl("/", request), {
             status: 307,
         })
         response.headers.append(

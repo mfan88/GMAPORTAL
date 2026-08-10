@@ -488,6 +488,15 @@ export function toRequestShape(request: NextRequest) {
   }
 }
 
+/**
+ * Build an absolute public URL. Never use `request.url` as the base behind
+ * Cloudways/nginx — Next often sees http(s)://localhost:PORT internally.
+ */
+export function publicUrl(path: string, request: NextRequest): URL {
+  const origin = getAppOrigin(toRequestShape(request))
+  return new URL(path, `${origin}/`)
+}
+
 // ===========================================================================
 // PKCE / auth-flow cookies
 // ===========================================================================
@@ -1874,7 +1883,7 @@ function redirectWithCookies(
   redirectPath: string,
   cookies: string[]
 ) {
-  const response = NextResponse.redirect(new URL(redirectPath, request.url), {
+  const response = NextResponse.redirect(publicUrl(redirectPath, request), {
     status: 307,
   })
   for (const cookie of cookies) {

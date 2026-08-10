@@ -7,6 +7,7 @@ import {
     createPkcePair,
     hasValidAdminAccess,
     pkceCookieHeader,
+    publicUrl,
     toRequestShape,
 } from "@/lib/server"
 
@@ -14,10 +15,9 @@ export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
     if (!(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))) {
-        return NextResponse.redirect(
-            new URL("/api/auth/admin/login", request.url),
-            { status: 307 }
-        )
+        return NextResponse.redirect(publicUrl("/api/auth/admin/login", request), {
+            status: 307,
+        })
     }
 
     try {
