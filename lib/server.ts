@@ -479,6 +479,8 @@ export function toRequestShape(request: NextRequest) {
   return {
     headers: {
       host: request.headers.get("host") ?? undefined,
+      "x-forwarded-host":
+        request.headers.get("x-forwarded-host") ?? undefined,
       "x-forwarded-proto":
         request.headers.get("x-forwarded-proto") ?? undefined,
       cookie: request.headers.get("cookie") ?? undefined,
@@ -649,48 +651,95 @@ function isDevRuntime() {
   return process.env.NODE_ENV !== "production"
 }
 
+function isLoopbackHost(hostname: string) {
+  const host = hostname.toLowerCase()
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host.endsWith(".localhost")
+  )
+}
+
 /**
- * Read configured public origin. Bracket access keeps Next from always baking
- * NEXT_PUBLIC_* to undefined when the var was missing at `next build`.
+ * Dynamic lookup so Next cannot replace NEXT_PUBLIC_* with undefined at build
+ * when the var was missing during `next build`.
+ */
+function readRuntimeEnv(name: string): string | undefined {
+  const value = process.env[name]
+  return typeof value === "string" && value.trim() ? value : undefined
+}
+
+/**
+ * Read configured public origin. Prefer APP_URL (runtime) over NEXT_PUBLIC_*.
  */
 function configuredAppOrigin(): string | null {
   return (
-    normalizeOrigin(process.env["NEXT_PUBLIC_APP_URL"]) ??
-    normalizeOrigin(process.env["APP_URL"])
+    normalizeOrigin(readRuntimeEnv("APP_URL")) ??
+    normalizeOrigin(readRuntimeEnv("NEXT_PUBLIC_APP_URL"))
   )
 }
 
 function missingAppUrlError() {
   return new Error(
-    "Missing NEXT_PUBLIC_APP_URL (or APP_URL). Set it to your public origin, e.g. https://upload.fenna.tech, then rebuild/redeploy."
+    "Missing APP_URL (or NEXT_PUBLIC_APP_URL). Set it to your public origin, e.g. https://upload.fenna.tech, then restart/rebuild."
   )
 }
 
-function requestProtocol(req: {
-  headers: {
-    host?: string
-    "x-forwarded-proto"?: string | string[]
-  }
-}): string {
-  if (typeof req.headers["x-forwarded-proto"] === "string") {
-    return req.headers["x-forwarded-proto"].split(",")[0]?.trim() || "https"
-  }
-  return req.headers.host?.includes("localhost") ? "http" : "https"
+function headerValue(
+  value: string | string[] | undefined
+): string | undefined {
+  if (typeof value === "string") return value.split(",")[0]?.trim() || undefined
+  if (Array.isArray(value)) return value[0]?.split(",")[0]?.trim() || undefined
+  return undefined
 }
 
-function originFromRequest(req?: {
+type OriginRequest = {
   headers: {
     host?: string
+    "x-forwarded-host"?: string | string[]
     "x-forwarded-proto"?: string | string[]
   }
-}): string | null {
-  if (!req?.headers.host) return null
-  return normalizeOrigin(`${requestProtocol(req)}://${req.headers.host}`)
 }
 
-export function getAppOrigin() {
+function requestProtocol(req: OriginRequest): string {
+  const forwarded = headerValue(req.headers["x-forwarded-proto"])
+  if (forwarded) return forwarded
+
+  const host =
+    headerValue(req.headers["x-forwarded-host"]) ?? req.headers.host ?? ""
+  return isLoopbackHost(host.split(":")[0] ?? host) ? "http" : "https"
+}
+
+function requestHost(req: OriginRequest): string | null {
+  // Cloudways/nginx often sets Host to localhost and the public domain on
+  // X-Forwarded-Host — prefer the forwarded host for OAuth redirects.
+  const forwarded = headerValue(req.headers["x-forwarded-host"])
+  if (forwarded && !isLoopbackHost(forwarded.split(":")[0] ?? forwarded)) {
+    return forwarded
+  }
+
+  const host = req.headers.host
+  if (!host) return null
+  if (!isDevRuntime() && isLoopbackHost(host.split(":")[0] ?? host)) {
+    return null
+  }
+  return host
+}
+
+function originFromRequest(req?: OriginRequest): string | null {
+  if (!req) return null
+  const host = requestHost(req)
+  if (!host) return null
+  return normalizeOrigin(`${requestProtocol(req)}://${host}`)
+}
+
+export function getAppOrigin(req?: OriginRequest) {
   const configured = configuredAppOrigin()
   if (configured) return configured
+
+  const fromRequest = originFromRequest(req)
+  if (fromRequest) return fromRequest
 
   // Outside `next dev`, never fall back to localhost — that silently breaks OAuth.
   if (!isDevRuntime()) {
@@ -710,78 +759,48 @@ export function getAppOrigin() {
   )
 }
 
-export function getPublicSiteOrigin(req?: {
-  headers: {
-    host?: string
-    "x-forwarded-proto"?: string | string[]
-  }
-}) {
+export function getPublicSiteOrigin(req?: OriginRequest) {
   const configured = configuredAppOrigin()
   if (configured) return configured
 
-  if (!isDevRuntime()) {
-    throw missingAppUrlError()
-  }
-
-  // Dev only: allow inbound Host / localhost when env is unset.
-  return originFromRequest(req) ?? getAppOrigin()
-}
-
-function resolveRedirectUri(
-  pathName: string,
-  req?: {
-    headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
-  }
-) {
-  if (process.env.ONEDRIVE_REDIRECT_URI) {
-    return process.env.ONEDRIVE_REDIRECT_URI.replace(/\/$/, "")
-  }
-
-  // Production / `next start`: always use NEXT_PUBLIC_APP_URL (or APP_URL).
-  const configured = configuredAppOrigin()
-  if (configured) {
-    return `${configured}${pathName}`
-  }
-
-  if (!isDevRuntime()) {
-    throw missingAppUrlError()
-  }
-
   const fromRequest = originFromRequest(req)
-  if (fromRequest) {
-    return `${fromRequest}${pathName}`
+  if (fromRequest) return fromRequest
+
+  if (!isDevRuntime()) {
+    throw missingAppUrlError()
   }
 
-  return `${getAppOrigin()}${pathName}`
+  return getAppOrigin(req)
 }
 
-export function getOneDriveRedirectUri(req?: {
-  headers: {
-    host?: string
-    "x-forwarded-proto"?: string | string[]
+function resolveRedirectUri(pathName: string, req?: OriginRequest) {
+  const explicit = readRuntimeEnv("ONEDRIVE_REDIRECT_URI")
+  if (explicit) {
+    return explicit.replace(/\/$/, "")
   }
-}) {
+
+  // 1) Env origin (APP_URL / NEXT_PUBLIC_APP_URL)
+  // 2) Public forwarded host (Cloudways-safe)
+  // 3) Dev localhost only
+  const origin = getAppOrigin(req)
+  return `${origin}${pathName}`
+}
+
+export function getOneDriveRedirectUri(req?: OriginRequest) {
   return resolveRedirectUri("/api/auth/onedrive/callback", req)
 }
 
-export function getUploadAccessRedirectUri(req?: {
-  headers: {
-    host?: string
-    "x-forwarded-proto"?: string | string[]
-  }
-}) {
+export function getUploadAccessRedirectUri(req?: OriginRequest) {
   return resolveRedirectUri("/api/auth/upload-access/callback", req)
 }
 
-export function getRegisteredRedirectUris() {
-  if (process.env.ONEDRIVE_REDIRECT_URI) {
-    return [process.env.ONEDRIVE_REDIRECT_URI.replace(/\/$/, "")]
+export function getRegisteredRedirectUris(req?: OriginRequest) {
+  const explicit = readRuntimeEnv("ONEDRIVE_REDIRECT_URI")
+  if (explicit) {
+    return [explicit.replace(/\/$/, "")]
   }
 
-  const origin = getAppOrigin()
+  const origin = getAppOrigin(req)
   return [
     `${origin}/api/auth/onedrive/callback`,
     `${origin}/api/auth/upload-access/callback`,
