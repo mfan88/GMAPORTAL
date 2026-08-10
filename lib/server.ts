@@ -623,7 +623,8 @@ export const uploadScopes = ["Files.ReadWrite"] as const
  */
 function normalizeOrigin(value: string | null | undefined): string | null {
   if (!value) return null
-  const trimmed = value.trim().replace(/\/$/, "")
+  // Strip wrapping quotes some hosts inject into env values.
+  const trimmed = value.trim().replace(/^["']|["']$/g, "").replace(/\/$/, "")
   if (!trimmed) return null
 
   try {
@@ -642,6 +643,27 @@ function normalizeOrigin(value: string | null | undefined): string | null {
   } catch {
     return null
   }
+}
+
+function isDevRuntime() {
+  return process.env.NODE_ENV !== "production"
+}
+
+/**
+ * Read configured public origin. Bracket access keeps Next from always baking
+ * NEXT_PUBLIC_* to undefined when the var was missing at `next build`.
+ */
+function configuredAppOrigin(): string | null {
+  return (
+    normalizeOrigin(process.env["NEXT_PUBLIC_APP_URL"]) ??
+    normalizeOrigin(process.env["APP_URL"])
+  )
+}
+
+function missingAppUrlError() {
+  return new Error(
+    "Missing NEXT_PUBLIC_APP_URL (or APP_URL). Set it to your public origin, e.g. https://upload.fenna.tech, then rebuild/redeploy."
+  )
 }
 
 function requestProtocol(req: {
@@ -667,9 +689,15 @@ function originFromRequest(req?: {
 }
 
 export function getAppOrigin() {
-  const configured =
-    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
-    normalizeOrigin(process.env.APP_URL) ??
+  const configured = configuredAppOrigin()
+  if (configured) return configured
+
+  // Outside `next dev`, never fall back to localhost — that silently breaks OAuth.
+  if (!isDevRuntime()) {
+    throw missingAppUrlError()
+  }
+
+  return (
     normalizeOrigin(
       process.env.VERCEL_PROJECT_PRODUCTION_URL
         ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
@@ -677,9 +705,9 @@ export function getAppOrigin() {
     ) ??
     normalizeOrigin(
       process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
-    )
-
-  return configured ?? "http://localhost:3000"
+    ) ??
+    "http://localhost:3000"
+  )
 }
 
 export function getPublicSiteOrigin(req?: {
@@ -688,14 +716,15 @@ export function getPublicSiteOrigin(req?: {
     "x-forwarded-proto"?: string | string[]
   }
 }) {
-  // Prefer a valid configured public URL, then the inbound request host so
-  // shareable portal links always include a real scheme + host.
-  return (
-    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
-    normalizeOrigin(process.env.APP_URL) ??
-    originFromRequest(req) ??
-    getAppOrigin()
-  )
+  const configured = configuredAppOrigin()
+  if (configured) return configured
+
+  if (!isDevRuntime()) {
+    throw missingAppUrlError()
+  }
+
+  // Dev only: allow inbound Host / localhost when env is unset.
+  return originFromRequest(req) ?? getAppOrigin()
 }
 
 function resolveRedirectUri(
@@ -711,11 +740,14 @@ function resolveRedirectUri(
     return process.env.ONEDRIVE_REDIRECT_URI.replace(/\/$/, "")
   }
 
-  const configured =
-    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
-    normalizeOrigin(process.env.APP_URL)
+  // Production / `next start`: always use NEXT_PUBLIC_APP_URL (or APP_URL).
+  const configured = configuredAppOrigin()
   if (configured) {
     return `${configured}${pathName}`
+  }
+
+  if (!isDevRuntime()) {
+    throw missingAppUrlError()
   }
 
   const fromRequest = originFromRequest(req)

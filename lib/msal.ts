@@ -7,11 +7,32 @@ import { PublicClientApplication } from "@azure/msal-browser"
 
 const REDIRECT_PATH = "/redirect"
 
-export function getRedirectUri() {
-  if (typeof window === "undefined") {
-    return "http://localhost:3000/redirect"
+function configuredBrowserOrigin(): string | null {
+  const raw = process.env["NEXT_PUBLIC_APP_URL"]?.trim().replace(/^["']|["']$/g, "")
+  if (!raw) return null
+  try {
+    const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+    return new URL(withProtocol).origin
+  } catch {
+    return null
   }
-  return `${window.location.origin}${REDIRECT_PATH}`
+}
+
+export function getRedirectUri() {
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${REDIRECT_PATH}`
+  }
+
+  const configured = configuredBrowserOrigin()
+  if (configured) return `${configured}${REDIRECT_PATH}`
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Missing NEXT_PUBLIC_APP_URL. Set it to your public origin, e.g. https://upload.fenna.tech."
+    )
+  }
+
+  return `http://localhost:3000${REDIRECT_PATH}`
 }
 
 export function clearStaleMsalUrlParams() {
@@ -57,6 +78,23 @@ export const tokenRequest = {
   authority: msalAuthority,
 }
 
+function resolvePostLogoutRedirectUri() {
+  if (typeof window !== "undefined") {
+    return window.location.origin
+  }
+
+  const configured = configuredBrowserOrigin()
+  if (configured) return configured
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Missing NEXT_PUBLIC_APP_URL. Set it to your public origin, e.g. https://upload.fenna.tech."
+    )
+  }
+
+  return "http://localhost:3000"
+}
+
 export function createMsalConfig(): Configuration {
   if (!msalClientId) {
     throw new Error(
@@ -69,10 +107,7 @@ export function createMsalConfig(): Configuration {
       clientId: msalClientId,
       authority: msalAuthority,
       redirectUri: getRedirectUri(),
-      postLogoutRedirectUri:
-        typeof window !== "undefined"
-          ? window.location.origin
-          : "http://localhost:3000",
+      postLogoutRedirectUri: resolvePostLogoutRedirectUri(),
     },
     cache: {
       cacheLocation: "sessionStorage",
