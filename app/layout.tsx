@@ -49,6 +49,9 @@ export default function RootLayout({
                 montserratHeading.variable
             )}
         >
+            <head>
+                <title>GMA Upload Portal</title>
+            </head>
             <body>
                 <FileProvider>
                     <ThemeProvider>{children}</ThemeProvider>
