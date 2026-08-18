@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { Check, Minus, Plus, X } from "lucide-react"
 import type { AppConfig } from "@/lib/appConfig"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,42 +17,100 @@ import {
 
 type DriveOption = { id: string; name: string }
 
+type DurationUnit = "seconds" | "minutes" | "hours" | "days"
+
+const DURATION_UNITS: { value: DurationUnit; label: string }[] = [
+  { value: "seconds", label: "Seconds" },
+  { value: "minutes", label: "Minutes" },
+  { value: "hours", label: "Hours" },
+  { value: "days", label: "Days" },
+]
+
+const UNIT_MS: Record<DurationUnit, number> = {
+  seconds: 1_000,
+  minutes: 60_000,
+  hours: 3_600_000,
+  days: 86_400_000,
+}
+
 type SettingsForm = {
   folderName: string
   referenceSheetName: string
   childNameColumn: string
   edcColumn: string
-  bufferMinutes: number
-  expiryHours: number
-  allowedAdminEmailsText: string
+  bufferValue: number
+  bufferUnit: DurationUnit
+  expiryValue: number
+  expiryUnit: DurationUnit
+  allowedAdminEmails: string[]
+}
+
+function msToDuration(
+  ms: number,
+  options: { allowZero: boolean }
+): { value: number; unit: DurationUnit } {
+  const raw = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0
+  if (raw === 0 && options.allowZero) {
+    return { value: 0, unit: "minutes" }
+  }
+
+  const positive = Math.max(options.allowZero ? 0 : 1, raw)
+  if (positive % UNIT_MS.days === 0) {
+    return { value: positive / UNIT_MS.days, unit: "days" }
+  }
+  if (positive % UNIT_MS.hours === 0) {
+    return { value: positive / UNIT_MS.hours, unit: "hours" }
+  }
+  if (positive % UNIT_MS.minutes === 0) {
+    return { value: positive / UNIT_MS.minutes, unit: "minutes" }
+  }
+  return {
+    value: Math.max(1, Math.round(positive / UNIT_MS.seconds)),
+    unit: "seconds",
+  }
+}
+
+function durationToMs(value: number, unit: DurationUnit) {
+  const amount = Number.isFinite(value) ? value : 0
+  return Math.max(0, amount) * UNIT_MS[unit]
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
 function configToForm(config: AppConfig): SettingsForm {
+  const buffer = msToDuration(config.bufferTimeMs, { allowZero: true })
+  const expiry = msToDuration(config.linkExpiryTimeMs, { allowZero: false })
   return {
     folderName: config.folderName,
     referenceSheetName: config.referenceSheetName,
     childNameColumn: config.childNameColumn,
     edcColumn: config.edcColumn,
-    bufferMinutes: Math.max(0, Math.round(config.bufferTimeMs / 60_000)),
-    expiryHours: Math.max(1, Math.round(config.linkExpiryTimeMs / 3_600_000)),
-    allowedAdminEmailsText: config.allowedAdminEmails.join("\n"),
+    bufferValue: buffer.value,
+    bufferUnit: buffer.unit,
+    expiryValue: Math.max(1, expiry.value),
+    expiryUnit: expiry.unit,
+    allowedAdminEmails: [...config.allowedAdminEmails.map(normalizeEmail)],
   }
 }
 
 function formToConfigPatch(form: SettingsForm) {
-  const allowedAdminEmails = form.allowedAdminEmailsText
-    .split(/[\n,;]+/)
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean)
-
   return {
     folderName: form.folderName.trim(),
     referenceSheetName: form.referenceSheetName.trim(),
     childNameColumn: form.childNameColumn.trim(),
     edcColumn: form.edcColumn.trim(),
-    bufferTimeMs: Math.max(0, form.bufferMinutes) * 60_000,
-    linkExpiryTimeMs: Math.max(1, form.expiryHours) * 3_600_000,
-    allowedAdminEmails: [...new Set(allowedAdminEmails)],
+    bufferTimeMs: durationToMs(form.bufferValue, form.bufferUnit),
+    linkExpiryTimeMs: Math.max(
+      UNIT_MS.seconds,
+      durationToMs(form.expiryValue, form.expiryUnit)
+    ),
+    allowedAdminEmails: [...new Set(form.allowedAdminEmails.map(normalizeEmail))],
   }
 }
 
@@ -62,6 +121,76 @@ function isBenignFetchInterruption(error: unknown) {
     error.name === "AbortError" ||
     error.message === "Failed to fetch" ||
     /aborted|networkerror/i.test(error.message)
+  )
+}
+
+function DurationField({
+  id,
+  label,
+  value,
+  unit,
+  min,
+  disabled,
+  onValueChange,
+  onUnitChange,
+}: Readonly<{
+  id: string
+  label: string
+  value: number
+  unit: DurationUnit
+  min: number
+  disabled: boolean
+  onValueChange: (value: number) => void
+  onUnitChange: (unit: DurationUnit) => void
+}>) {
+  const unitItems = DURATION_UNITS.map((item) => ({
+    label: item.label,
+    value: item.value,
+  }))
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          type="number"
+          min={min}
+          step={1}
+          disabled={disabled}
+          value={value}
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            onValueChange(
+              Number.isFinite(next) ? Math.max(min, next) : min
+            )
+          }}
+          className="min-w-0 flex-1"
+        />
+        <Select
+          items={unitItems}
+          value={unit}
+          onValueChange={(next) => {
+            if (typeof next !== "string") return
+            onUnitChange(next as DurationUnit)
+          }}
+          disabled={disabled}
+        >
+          <SelectTrigger className="w-[8.5rem] shrink-0" aria-label={`${label} unit`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {DURATION_UNITS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
   )
 }
 
@@ -81,6 +210,11 @@ export default function SettingsCard({
   const [workbooks, setWorkbooks] = useState<DriveOption[]>([])
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saved, setSaved] = useState<SettingsForm | null>(null)
+  const [addingEmail, setAddingEmail] = useState(false)
+  const [newEmail, setNewEmail] = useState("")
+  const [pendingRemoveEmail, setPendingRemoveEmail] = useState<string | null>(
+    null
+  )
 
   const loadBrowse = useCallback(async () => {
     if (!connected) {
@@ -102,7 +236,6 @@ export default function SettingsCard({
       setFolders(browse.folders ?? [])
       setWorkbooks(browse.workbooks ?? [])
     } catch (error) {
-      // Navigating to Microsoft OAuth aborts in-flight fetches; don't flash a banner.
       if (isBenignFetchInterruption(error)) return
       const message =
         error instanceof Error ? error.message : "Could not load SharePoint items"
@@ -136,7 +269,6 @@ export default function SettingsCard({
     let cancelled = false
 
     void (async () => {
-      // Yield so setLoading is not synchronous inside the effect body.
       await Promise.resolve()
       if (cancelled) return
       setLoading(true)
@@ -173,9 +305,59 @@ export default function SettingsCard({
     }))
   }, [workbooks, form])
 
+  const resetEmailEditor = () => {
+    setAddingEmail(false)
+    setNewEmail("")
+    setPendingRemoveEmail(null)
+  }
+
   const cancel = () => {
     if (saved) setForm(saved)
     setEditing(false)
+    resetEmailEditor()
+  }
+
+  const confirmAddEmail = () => {
+    const email = normalizeEmail(newEmail)
+    if (!email) {
+      onBanner({ type: "error", message: "Enter an email address." })
+      return
+    }
+    if (!isValidEmail(email)) {
+      onBanner({ type: "error", message: "Enter a valid email address." })
+      return
+    }
+    setForm((prev) => {
+      if (!prev) return prev
+      if (prev.allowedAdminEmails.includes(email)) {
+        onBanner({ type: "error", message: "That email is already on the list." })
+        return prev
+      }
+      return {
+        ...prev,
+        allowedAdminEmails: [...prev.allowedAdminEmails, email],
+      }
+    })
+    resetEmailEditor()
+    onBanner(null)
+  }
+
+  const requestRemoveEmail = (email: string) => {
+    if (pendingRemoveEmail === email) {
+      setForm((prev) =>
+        prev
+          ? {
+              ...prev,
+              allowedAdminEmails: prev.allowedAdminEmails.filter(
+                (entry) => entry !== email
+              ),
+            }
+          : prev
+      )
+      setPendingRemoveEmail(null)
+      return
+    }
+    setPendingRemoveEmail(email)
   }
 
   const save = async () => {
@@ -196,6 +378,13 @@ export default function SettingsCard({
       onBanner({ type: "error", message: "EDC column is required." })
       return
     }
+    if (form.allowedAdminEmails.length === 0) {
+      onBanner({
+        type: "error",
+        message: "Add at least one allowed admin email.",
+      })
+      return
+    }
 
     setSaving(true)
     onBanner(null)
@@ -213,6 +402,7 @@ export default function SettingsCard({
       setForm(nextForm)
       setSaved(nextForm)
       setEditing(false)
+      resetEmailEditor()
       onBanner({ type: "success", message: "Settings saved." })
       onConfigSaved?.()
     } catch (error) {
@@ -235,6 +425,7 @@ export default function SettingsCard({
             disabled={!connected || loading || !form}
             onClick={() => {
               setEditing(true)
+              resetEmailEditor()
               void loadBrowse()
             }}
           >
@@ -364,76 +555,166 @@ export default function SettingsCard({
             date in the workbook.
           </p>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="settings-buffer">Link buffer (minutes)</Label>
-              <Input
-                id="settings-buffer"
-                type="number"
-                min={0}
-                step={1}
-                disabled={!editing}
-                value={form.bufferMinutes}
-                onChange={(event) => {
-                  const value = Number(event.target.value)
-                  setForm((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          bufferMinutes: Number.isFinite(value)
-                            ? Math.max(0, value)
-                            : 0,
-                        }
-                      : prev
-                  )
-                }}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="settings-expiry">Link expiry (hours)</Label>
-              <Input
-                id="settings-expiry"
-                type="number"
-                min={1}
-                step={1}
-                disabled={!editing}
-                value={form.expiryHours}
-                onChange={(event) => {
-                  const value = Number(event.target.value)
-                  setForm((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          expiryHours: Number.isFinite(value)
-                            ? Math.max(1, value)
-                            : 1,
-                        }
-                      : prev
-                  )
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="settings-admin-emails">Allowed admin emails</Label>
-            <textarea
-              id="settings-admin-emails"
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <DurationField
+              id="settings-buffer"
+              label="Link buffer"
+              value={form.bufferValue}
+              unit={form.bufferUnit}
+              min={0}
               disabled={!editing}
-              rows={4}
-              placeholder={"name@outlook.com\nname@company.com"}
-              value={form.allowedAdminEmailsText}
-              onChange={(event) => {
-                const value = event.target.value
+              onValueChange={(value) => {
                 setForm((prev) =>
-                  prev ? { ...prev, allowedAdminEmailsText: value } : prev
+                  prev ? { ...prev, bufferValue: value } : prev
                 )
               }}
-              className="min-h-24 w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              onUnitChange={(unit) => {
+                setForm((prev) =>
+                  prev ? { ...prev, bufferUnit: unit } : prev
+                )
+              }}
             />
+            <DurationField
+              id="settings-expiry"
+              label="Link availability"
+              value={form.expiryValue}
+              unit={form.expiryUnit}
+              min={1}
+              disabled={!editing}
+              onValueChange={(value) => {
+                setForm((prev) =>
+                  prev ? { ...prev, expiryValue: value } : prev
+                )
+              }}
+              onUnitChange={(unit) => {
+                setForm((prev) =>
+                  prev ? { ...prev, expiryUnit: unit } : prev
+                )
+              }}
+            />
+          </div>
+          <p className="-mt-2 text-xs text-black/45">
+            Buffer delays when a new link becomes usable. Availability is how
+            long the link stays valid after creation.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <Label>Allowed admin emails</Label>
+              {editing && !addingEmail ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1 px-2"
+                  onClick={() => {
+                    setPendingRemoveEmail(null)
+                    setAddingEmail(true)
+                  }}
+                >
+                  <Plus className="size-3.5" />
+                  Add
+                </Button>
+              ) : null}
+            </div>
+
+            <ul className="divide-y divide-black/10 overflow-hidden rounded-lg border border-black/10">
+              {form.allowedAdminEmails.length === 0 ? (
+                <li className="px-3 py-3 text-sm text-black/45">
+                  No admin emails yet.
+                </li>
+              ) : (
+                form.allowedAdminEmails.map((email) => {
+                  const confirming = pendingRemoveEmail === email
+                  return (
+                    <li
+                      key={email}
+                      className="flex items-center gap-2 px-3 py-2.5"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {email}
+                      </span>
+                      {editing ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={confirming ? "destructive" : "outline"}
+                          className="h-8 shrink-0 gap-1 px-2"
+                          onClick={() => requestRemoveEmail(email)}
+                          onBlur={() => {
+                            if (pendingRemoveEmail === email) {
+                              setPendingRemoveEmail(null)
+                            }
+                          }}
+                        >
+                          {confirming ? (
+                            <>
+                              <Check className="size-3.5" />
+                              Confirm
+                            </>
+                          ) : (
+                            <Minus className="size-3.5" />
+                          )}
+                        </Button>
+                      ) : null}
+                    </li>
+                  )
+                })
+              )}
+            </ul>
+
+            {editing && addingEmail ? (
+              <div className="flex flex-col gap-2 rounded-lg border border-black/10 p-3">
+                <Label htmlFor="settings-new-admin-email" className="text-xs">
+                  New admin email
+                </Label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    id="settings-new-admin-email"
+                    type="email"
+                    autoFocus
+                    placeholder="name@company.com"
+                    value={newEmail}
+                    onChange={(event) => setNewEmail(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault()
+                        confirmAddEmail()
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault()
+                        resetEmailEditor()
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="gap-1"
+                      onClick={confirmAddEmail}
+                    >
+                      <Check className="size-3.5" />
+                      Confirm
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="gap-1"
+                      onClick={resetEmailEditor}
+                    >
+                      <X className="size-3.5" />
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <p className="text-xs text-black/45">
-              One Microsoft account email per line. These work accounts can open
-              this admin console.
+              These work accounts can open this admin console. Click − once,
+              then Confirm to remove.
             </p>
           </div>
         </div>
