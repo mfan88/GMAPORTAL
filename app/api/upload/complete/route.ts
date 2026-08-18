@@ -6,7 +6,6 @@ import {
   clearUploadAccessCookieHeader,
   consumeUploadLink,
   getAppConfig,
-  getConnectedOneDriveAccount,
   getPortalAccessTokenFromRequest,
   getUploadLink,
   toRequestShape,
@@ -22,8 +21,8 @@ type CompleteBody = {
 /**
  * Called by the client after an upload completes successfully. This consumes the
  * parent's single-use link and revokes their session cookie, so each link is
- * good for exactly one successful upload. Also emails the connected OneDrive
- * owner (and allowlisted admins) with the child name + file link.
+ * good for exactly one successful upload. Also emails allowlisted admins with
+ * the child name + file link.
  */
 export async function POST(request: NextRequest) {
   const shaped = toRequestShape(request)
@@ -49,17 +48,15 @@ export async function POST(request: NextRequest) {
 
   if (token && webUrl) {
     try {
-      const [link, account, config] = await Promise.all([
+      const [link, config] = await Promise.all([
         getUploadLink(token),
-        getConnectedOneDriveAccount(),
         getAppConfig(),
       ])
 
       const childName = link?.childName?.trim() ?? ""
-      const recipients = [
-        account?.username,
-        ...config.allowedAdminEmails,
-      ].filter((address): address is string => Boolean(address?.trim()))
+      const recipients = [...config.allowedAdminEmails].filter(
+        (address): address is string => Boolean(address?.trim())
+      )
 
       if (childName) {
         const result = await sendUploadNotificationEmail({

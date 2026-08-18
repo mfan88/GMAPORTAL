@@ -2,7 +2,7 @@
  * App/Upload Settings
  */
 export type AppConfig = {
-  folderName: string // OneDrive folder that receives uploads
+  folderName: string // Folder under the SharePoint site drive that receives uploads
   bufferTimeMs: number // How long after creation before a link becomes usable (ms)
   linkExpiryTimeMs: number
   fileDetails: {
@@ -14,7 +14,7 @@ export type AppConfig = {
   acceptedUploadTypes: {
     readonly "video/*": readonly []
   }
-  /** Excel workbook filename in OneDrive (e.g. REFERENCE.xlsx). */
+  /** Excel workbook filename under the SharePoint site drive (e.g. REFERENCE.xlsx). */
   referenceSheetName: string
   /** Column header (or letter) with the child's name. */
   childNameColumn: string
@@ -25,6 +25,12 @@ export type AppConfig = {
    * Compared case-insensitively. Can also be seeded via ALLOWED_ADMIN_EMAILS.
    */
   allowedAdminEmails: string[]
+  /** Graph site ID of the connected SharePoint site (e.g. "contoso.sharepoint.com,guid,guid"). */
+  sharePointSiteId: string
+  /** SharePoint site URL as entered/resolved at connect time (for display). */
+  sharePointSiteUrl: string
+  /** Display name of the connected SharePoint site (for display). */
+  sharePointSiteName: string
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -44,6 +50,9 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   childNameColumn: "Child Name",
   edcColumn: "EDC",
   allowedAdminEmails: ["marcusfan06@outlook.com"],
+  sharePointSiteId: "",
+  sharePointSiteUrl: "",
+  sharePointSiteName: "",
 }
 
 

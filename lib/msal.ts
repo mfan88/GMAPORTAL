@@ -59,13 +59,13 @@ export function clearStaleMsalUrlParams() {
 
 export const msalClientId = process.env.NEXT_PUBLIC_AZURE_CLIENT_ID ?? ""
 
-// /common requires Azure app SignInAudience = AzureADandPersonalMicrosoftAccount
-// ("Accounts in any org directory and personal Microsoft accounts").
 export const msalAuthority =
   process.env.NEXT_PUBLIC_AZURE_AUTHORITY ??
-  "https://login.microsoftonline.com/common"
+  (process.env.NEXT_PUBLIC_AZURE_TENANT_ID
+    ? `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_AZURE_TENANT_ID}`
+    : "https://login.microsoftonline.com/organizations")
 
-export const graphScopes = ["User.Read", "Files.ReadWrite"] as const
+export const graphScopes = ["User.Read"] as const
 
 export const loginRequest = {
   scopes: [...graphScopes],
@@ -74,7 +74,7 @@ export const loginRequest = {
 }
 
 export const tokenRequest = {
-  scopes: ["Files.ReadWrite"],
+  scopes: ["User.Read"],
   authority: msalAuthority,
 }
 

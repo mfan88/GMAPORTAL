@@ -23,6 +23,10 @@ import { Input } from "@/components/ui/input"
 type ConnectionStatus = {
   connected: boolean
   username: string | null
+  siteId?: string | null
+  siteUrl?: string | null
+  siteName?: string | null
+  error?: string
   tokenStorage?: string
 }
 
@@ -75,6 +79,8 @@ export default function ConsolePage() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null)
   const [links, setLinks] = useState<UploadLink[]>([])
   const [isDisconnecting, setIsDisconnecting] = useState(false)
+  const [isConnectingSite, setIsConnectingSite] = useState(false)
+  const [siteUrlInput, setSiteUrlInput] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
   const [children, setChildren] = useState<ReferenceChild[]>([])
@@ -157,20 +163,18 @@ export default function ConsolePage() {
         if (connectedParam) {
           setBanner({
             type: "success",
-            message: "OneDrive connected and ready to receive uploads.",
+            message: "SharePoint site connected and ready to receive uploads.",
           })
         } else if (errorParam) {
-          const emailParam = params.get("email")
           const setupErrors: Record<string, string> = {
             unauthorized_admin:
               "That Microsoft account is not on the admin allowlist.",
             no_admins_configured:
-              "No admin emails are configured. Set ALLOWED_ADMIN_EMAILS in the environment, then connect again.",
+              "No admin emails are configured. Set ALLOWED_ADMIN_EMAILS in the environment, then sign in again.",
             missing_account:
               "We could not read the Microsoft account you signed in with.",
-            onedrive_not_allowlisted: emailParam
-              ? `Add ${emailParam} to Allowed admin emails in Settings, then connect that OneDrive account again.`
-              : "That OneDrive account is not on the admin allowlist. Add it in Settings, then try again.",
+            use_sharepoint_connect:
+              "Connect a SharePoint site from this page instead of signing in a personal OneDrive account.",
           }
           setBanner({
             type: "error",
@@ -244,6 +248,7 @@ export default function ConsolePage() {
     void fetch("/api/auth/onedrive/status", { method: "DELETE" })
       .then(() => {
         setStatus({ connected: false, username: null })
+        setSiteUrlInput("")
         setBanner(null)
         setChildren([])
         setSelectedChild(null)
@@ -253,6 +258,49 @@ export default function ConsolePage() {
       })
       .finally(() => setIsDisconnecting(false))
   }, [])
+
+  const connectSite = useCallback(async () => {
+    const siteUrl = siteUrlInput.trim()
+    if (!siteUrl) {
+      setBanner({
+        type: "error",
+        message: "Enter a SharePoint site URL (or Graph site id) first.",
+      })
+      return
+    }
+
+    setIsConnectingSite(true)
+    setBanner(null)
+    try {
+      const res = await fetch("/api/sharepoint/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteUrl }),
+      })
+      const data = (await res.json()) as ConnectionStatus & { error?: string }
+      if (!res.ok) {
+        throw new Error(data.error ?? "Could not connect SharePoint site")
+      }
+      setStatus({
+        connected: true,
+        username: data.siteName ?? data.username ?? null,
+        siteId: data.siteId,
+        siteUrl: data.siteUrl,
+        siteName: data.siteName,
+      })
+      setBanner({
+        type: "success",
+        message: "SharePoint site connected and ready to receive uploads.",
+      })
+      loadChildNames()
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not connect SharePoint site"
+      setBanner({ type: "error", message })
+    } finally {
+      setIsConnectingSite(false)
+    }
+  }, [loadChildNames, siteUrlInput])
 
   const connected = Boolean(status?.connected)
 
@@ -323,7 +371,7 @@ export default function ConsolePage() {
     if (!connected) {
       return (
         <p className="text-sm text-black/50">
-          Connect a OneDrive account to load children from the reference
+          Connect a SharePoint site to load children from the reference
           workbook.
         </p>
       )
@@ -457,36 +505,54 @@ export default function ConsolePage() {
 
             <p className="mt-3 text-sm text-black/70">
               {connected
-                ? `Videos upload to: ${status?.username ?? "unknown account"}`
-                : "No receiving OneDrive account is connected yet."}
+                ? `Videos upload to: ${status?.siteName ?? status?.username ?? "SharePoint site"}`
+                : "No SharePoint site is connected yet."}
             </p>
+            {connected && status?.siteUrl ? (
+              <p className="mt-1 truncate text-xs text-black/45">
+                {status.siteUrl}
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-black/45">
-              Changing this prompts a Microsoft sign-in for the receiving
-              account. That email must already be in Allowed admin emails.
-              Console login can still use a different allowlisted account.
+              Org-only mode uses application permission Sites.Selected. Grant
+              this app write access to one SharePoint site in Entra/Graph, then
+              paste that site URL here. Admin console login still uses
+              allowlisted work accounts (User.Read only).
             </p>
 
+            {!connected && (
+              <div className="mt-3 space-y-2">
+                <Label htmlFor="sharepoint-site-url" className="text-xs">
+                  SharePoint site URL
+                </Label>
+                <Input
+                  id="sharepoint-site-url"
+                  value={siteUrlInput}
+                  onChange={(event) => setSiteUrlInput(event.target.value)}
+                  placeholder="https://contoso.sharepoint.com/sites/Uploads"
+                />
+              </div>
+            )}
+
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={() => {
-                  // Hard navigation avoids client fetch/abort noise and ensures
-                  // Set-Cookie + OAuth redirect are handled as a full document load.
-                  window.location.assign("/api/auth/onedrive/login")
-                }}
-              >
-                {connected
-                  ? "Change receiving OneDrive"
-                  : "Connect receiving OneDrive"}
-              </Button>
-              {connected && (
+              {!connected ? (
+                <Button
+                  size="sm"
+                  disabled={isConnectingSite}
+                  onClick={() => {
+                    void connectSite()
+                  }}
+                >
+                  {isConnectingSite ? "Connecting..." : "Connect SharePoint site"}
+                </Button>
+              ) : (
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={isDisconnecting}
                   onClick={disconnect}
                 >
-                  {isDisconnecting ? "Disconnecting..." : "Disconnect"}
+                  {isDisconnecting ? "Disconnecting..." : "Disconnect site"}
                 </Button>
               )}
             </div>

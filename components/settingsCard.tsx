@@ -97,7 +97,7 @@ export default function SettingsCard({
         error?: string
       }
       if (!browseRes.ok) {
-        throw new Error(browse.error ?? "Could not load OneDrive items")
+        throw new Error(browse.error ?? "Could not load SharePoint items")
       }
       setFolders(browse.folders ?? [])
       setWorkbooks(browse.workbooks ?? [])
@@ -105,7 +105,7 @@ export default function SettingsCard({
       // Navigating to Microsoft OAuth aborts in-flight fetches; don't flash a banner.
       if (isBenignFetchInterruption(error)) return
       const message =
-        error instanceof Error ? error.message : "Could not load OneDrive items"
+        error instanceof Error ? error.message : "Could not load SharePoint items"
       onBanner({ type: "error", message })
     }
   }, [connected, onBanner])
@@ -259,7 +259,7 @@ export default function SettingsCard({
 
       {!connected ? (
         <p className="mt-4 text-sm text-black/50">
-          Connect a OneDrive account to manage upload settings.
+          Connect a SharePoint site to manage upload settings.
         </p>
       ) : loading || !form ? (
         <p className="mt-4 text-sm text-black/50">Loading settings…</p>
@@ -292,7 +292,7 @@ export default function SettingsCard({
               </SelectContent>
             </Select>
             <p className="text-xs text-black/45">
-              Root folders in the connected OneDrive.
+              Root folders in the connected SharePoint site.
             </p>
           </div>
 
@@ -323,7 +323,7 @@ export default function SettingsCard({
               </SelectContent>
             </Select>
             <p className="text-xs text-black/45">
-              Excel (.xlsx) files found in OneDrive.
+              Excel (.xlsx) files found in the SharePoint site.
             </p>
           </div>
 
@@ -432,9 +432,8 @@ export default function SettingsCard({
               className="min-h-24 w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
             />
             <p className="text-xs text-black/45">
-              One Microsoft account email per line. These accounts can open
-              this admin console. The receiving OneDrive account must also be listed here
-              before you connect or change it.
+              One Microsoft account email per line. These work accounts can open
+              this admin console.
             </p>
           </div>
         </div>

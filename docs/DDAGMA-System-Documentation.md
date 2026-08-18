@@ -36,18 +36,18 @@ The product has two primary surfaces:
 ### 2.1 First-time clinic setup
 
 1. Deploy the app and configure environment variables (see §6).  
-2. Ensure your Microsoft Entra app registration allows the accounts you need (typically organizational + personal via `/common`) and lists redirect URIs:  
-   - `{APP_URL}/api/auth/onedrive/callback`  
-   - `{APP_URL}/api/auth/upload-access/callback`  
-3. Seed at least one admin email via `ALLOWED_ADMIN_EMAILS` and/or Settings → Allowed admin emails.  
-4. Open `/setup` and sign in with an allowlisted Microsoft account.  
-5. Connect the **receiving OneDrive** account (must also be on the allowlist).  
-6. In Settings, set:  
-   - Upload folder name (default `uploads`)  
-   - Reference Excel workbook name and child-name / EDC columns  
-   - Link buffer time and expiry  
-   - Admin allowlist  
-7. Confirm the reference workbook exists in that OneDrive and the child list loads.
+2. In Entra, register an **org** app (work/school accounts):  
+   - **Delegated:** `User.Read` (admin console sign-in)  
+   - **Application:** `Sites.Selected` (admin consent), then grant this app **write** on one SharePoint site  
+   - Redirect URI: `{APP_URL}/api/auth/upload-access/callback`  
+3. Set `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`, and `NEXT_PUBLIC_AZURE_CLIENT_ID`.  
+4. Seed at least one admin email via `ALLOWED_ADMIN_EMAILS` and/or Settings → Allowed admin emails.  
+5. Open `/setup` and sign in with an allowlisted **work** account.  
+6. Paste the SharePoint **site URL** and connect (Sites.Selected).  
+7. In Settings, set upload folder, reference workbook, columns, link timings, and admin allowlist.  
+8. Confirm the reference workbook exists in that site drive and the child list loads.
+
+Personal Microsoft accounts are **not** supported as the upload destination in this mode.
 
 ### 2.2 Generating a parent link
 
@@ -337,15 +337,17 @@ Accepted upload types default to `video/*` (client also accepts empty MIME + com
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `NEXT_PUBLIC_AZURE_CLIENT_ID` | Yes | Entra application (client) ID |
-| `AZURE_CLIENT_SECRET` | Yes (prod / silent refresh) | Confidential client secret |
+| `AZURE_CLIENT_SECRET` | Yes | Confidential client secret (app-only + admin auth code) |
+| `AZURE_TENANT_ID` | Yes | Org tenant id for Sites.Selected app-only tokens |
 | `NEXT_PUBLIC_APP_URL` / `APP_URL` | Yes | Canonical origin for links and redirects |
 | `UPSTASH_REDIS_REST_URL` | Yes | Redis REST endpoint |
 | `UPSTASH_REDIS_REST_TOKEN` | Yes | Redis token (also may sign cookies) |
 | `UPLOAD_ACCESS_SECRET` | Recommended in prod | Dedicated cookie signing secret |
 | `ALLOWED_ADMIN_EMAILS` | Recommended | Comma/newline list of admin emails |
-| `AZURE_AUTHORITY` | Optional | Default `https://login.microsoftonline.com/common` |
+| `SHAREPOINT_SITE_ID` / `SHAREPOINT_SITE_URL` | Optional | Pre-seed site; otherwise connect in `/setup` |
+| `AZURE_AUTHORITY` | Optional | Default tenant or `/organizations` |
 | `ONEDRIVE_REDIRECT_URI` | Optional | Narrow registered redirect URI |
-| `BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_ID` | Vercel | Persist MSAL OneDrive token cache |
+| `BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_ID` | Vercel | Optional legacy token-cache storage |
 | `ONEDRIVE_CACHE_PATH` | Optional local | Override local token cache path |
 | `AZURE_COMMUNICATION_SERVICES_CONNECTION_STRING` | For email | ACS connection string (**Communication Services** Keys blade) |
 | `AZURE_EMAIL_SENDER_ADDRESS` | For email | Verified MailFrom on a **domain linked** to that ACS resource |

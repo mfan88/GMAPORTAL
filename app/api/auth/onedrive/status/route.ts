@@ -54,7 +54,7 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ error: "Admin access required" }, { status: 401 })
     }
 
-    // Disconnect only the receiving OneDrive tokens — keep the admin console session.
+    // Disconnect SharePoint site config — keep the admin console session.
     await clearOneDriveConnection()
     return NextResponse.json({ connected: false })
 }

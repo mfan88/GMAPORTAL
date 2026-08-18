@@ -14,9 +14,7 @@ import {
   type AuthorizationCodeRequest,
   type AuthorizationUrlRequest,
   ConfidentialClientApplication,
-  type ICachePlugin,
   PublicClientApplication,
-  type SilentFlowRequest,
 } from "@azure/msal-node"
 import * as XLSX from "xlsx"
 import {
@@ -65,6 +63,9 @@ type AppConfigOverrides = {
   childNameColumn?: string
   edcColumn?: string
   allowedAdminEmails?: string[]
+  sharePointSiteId?: string
+  sharePointSiteUrl?: string
+  sharePointSiteName?: string
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -81,6 +82,14 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined
+}
+
+/**
+ * Like asNonEmptyString, but preserves an explicit "" so callers (e.g.
+ * clearOneDriveConnection) can intentionally blank out a saved value.
+ */
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() : undefined
 }
 
 function normalizeEmail(value: string): string {
@@ -128,6 +137,9 @@ function normalizeOverrides(raw: unknown): AppConfigOverrides {
     childNameColumn: asNonEmptyString(raw.childNameColumn),
     edcColumn: asNonEmptyString(raw.edcColumn),
     allowedAdminEmails: asEmailList(raw.allowedAdminEmails),
+    sharePointSiteId: asOptionalString(raw.sharePointSiteId),
+    sharePointSiteUrl: asOptionalString(raw.sharePointSiteUrl),
+    sharePointSiteName: asOptionalString(raw.sharePointSiteName),
     fileDetails,
   }
 }
@@ -145,6 +157,12 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
     edcColumn: overrides.edcColumn ?? DEFAULT_APP_CONFIG.edcColumn,
     allowedAdminEmails:
       overrides.allowedAdminEmails ?? DEFAULT_APP_CONFIG.allowedAdminEmails,
+    sharePointSiteId:
+      overrides.sharePointSiteId ?? DEFAULT_APP_CONFIG.sharePointSiteId,
+    sharePointSiteUrl:
+      overrides.sharePointSiteUrl ?? DEFAULT_APP_CONFIG.sharePointSiteUrl,
+    sharePointSiteName:
+      overrides.sharePointSiteName ?? DEFAULT_APP_CONFIG.sharePointSiteName,
     acceptedUploadTypes: DEFAULT_APP_CONFIG.acceptedUploadTypes,
     fileDetails: {
       ...DEFAULT_APP_CONFIG.fileDetails,
@@ -194,6 +212,10 @@ export async function updateAppConfig(
     edcColumn: patch.edcColumn ?? existing.edcColumn,
     allowedAdminEmails:
       patch.allowedAdminEmails ?? existing.allowedAdminEmails,
+    sharePointSiteId: patch.sharePointSiteId ?? existing.sharePointSiteId,
+    sharePointSiteUrl: patch.sharePointSiteUrl ?? existing.sharePointSiteUrl,
+    sharePointSiteName:
+      patch.sharePointSiteName ?? existing.sharePointSiteName,
     fileDetails: {
       ...existing.fileDetails,
       ...patch.fileDetails,
@@ -606,27 +628,30 @@ export const msalClientId =
   process.env.AZURE_CLIENT_ID ??
   ""
 
-/** Required when redirect URIs are registered under the Web platform. */
+/** Required for the confidential client (app-only Sites.Selected + admin OAuth). */
 export const msalClientSecret = process.env.AZURE_CLIENT_SECRET ?? ""
 
-// /common requires Azure app SignInAudience = AzureADandPersonalMicrosoftAccount
-// ("Accounts in any org directory and personal Microsoft accounts").
-export const msalAuthority =
-  process.env.AZURE_AUTHORITY ??
-  process.env.NEXT_PUBLIC_AZURE_AUTHORITY ??
-  "https://login.microsoftonline.com/common"
+/** Entra tenant ID or verified domain. Required for app-only Sites.Selected tokens. */
+export const azureTenantId =
+  process.env.AZURE_TENANT_ID?.trim() ||
+  process.env.NEXT_PUBLIC_AZURE_TENANT_ID?.trim() ||
+  ""
+
+// Org-only: this app never signs in personal Microsoft accounts and never
+// uploads to a personal OneDrive, so we never fall back to /common.
+export const msalAuthority = azureTenantId
+  ? `https://login.microsoftonline.com/${azureTenantId}`
+  : "https://login.microsoftonline.com/organizations"
 
 type ServerMsalClient =
   | ConfidentialClientApplication
   | PublicClientApplication
 
-export const graphScopes = [
-  "User.Read",
-  "Files.ReadWrite",
-  "offline_access",
-] as const
+/** Interactive sign-in scope for admin / upload-access identity checks only. */
+export const identityScopes = ["User.Read"] as const
 
-export const uploadScopes = ["Files.ReadWrite"] as const
+/** @deprecated Use identityScopes. Kept as an alias for older imports. */
+export const graphScopes = identityScopes
 
 /**
  * Accept only real http(s) origins. Rejects bare UUIDs / client IDs that are
@@ -920,75 +945,170 @@ export function getTokenStorageDescription() {
 }
 
 // ===========================================================================
-// OneDrive / MSAL auth (server)
+// Microsoft Graph auth (admin identity + Sites.Selected app-only)
 // ===========================================================================
 
-let pca: ServerMsalClient | null = null
+let identityClient: ServerMsalClient | null = null
+let appOnlyClient: ConfidentialClientApplication | null = null
 
 function ensureClientId() {
   if (!msalClientId) {
     throw new Error(
-      "Missing NEXT_PUBLIC_AZURE_CLIENT_ID (or AZURE_CLIENT_ID). Set it in .env.local or your Vercel project environment."
+      "Missing NEXT_PUBLIC_AZURE_CLIENT_ID (or AZURE_CLIENT_ID). Set it in .env.local or your host environment."
     )
   }
 }
 
-function createCachePlugin(): ICachePlugin {
-  return {
-    beforeCacheAccess: async (cacheContext) => {
-      const serialized = await readTokenCache()
-      if (serialized) {
-        cacheContext.tokenCache.deserialize(serialized)
-      }
-    },
-    afterCacheAccess: async (cacheContext) => {
-      if (!cacheContext.cacheHasChanged) return
-      await writeTokenCache(cacheContext.tokenCache.serialize())
-    },
+function ensureAppOnlyCredentials() {
+  ensureClientId()
+  if (!msalClientSecret) {
+    throw new Error(
+      "Missing AZURE_CLIENT_SECRET. Required for Sites.Selected app-only SharePoint access."
+    )
+  }
+  if (!azureTenantId) {
+    throw new Error(
+      "Missing AZURE_TENANT_ID. Required for org-only Sites.Selected app-only tokens."
+    )
   }
 }
 
-function createServerMsalClient(options?: {
-  persistCache?: boolean
-}): ServerMsalClient {
+function createIdentityMsalClient(): ServerMsalClient {
   ensureClientId()
   const auth = {
     clientId: msalClientId,
     authority: msalAuthority,
     ...(msalClientSecret ? { clientSecret: msalClientSecret } : {}),
   }
-  const cache = options?.persistCache
-    ? { cachePlugin: createCachePlugin() }
-    : undefined
-
-  // Web-platform redirect URIs are confidential clients and require a secret.
   if (msalClientSecret) {
-    return new ConfidentialClientApplication({ auth, cache })
+    return new ConfidentialClientApplication({ auth })
   }
-  return new PublicClientApplication({ auth, cache })
+  return new PublicClientApplication({ auth })
 }
 
+function getIdentityClient() {
+  if (!identityClient) {
+    identityClient = createIdentityMsalClient()
+  }
+  return identityClient
+}
+
+function getAppOnlyClient() {
+  ensureAppOnlyCredentials()
+  if (!appOnlyClient) {
+    appOnlyClient = new ConfidentialClientApplication({
+      auth: {
+        clientId: msalClientId,
+        authority: `https://login.microsoftonline.com/${azureTenantId}`,
+        clientSecret: msalClientSecret,
+      },
+    })
+  }
+  return appOnlyClient
+}
+
+/** @deprecated Legacy name — identity client only (no file token cache). */
 export function getOneDriveClient() {
-  if (!pca) {
-    pca = createServerMsalClient({ persistCache: true })
-  }
-  return pca
+  return getIdentityClient()
 }
 
-async function getStoredAccounts(): Promise<AccountInfo[]> {
-  const client = getOneDriveClient()
-  const cache = client.getTokenCache()
-  // getAllAccounts() does not invoke the cache plugin — hydrate from disk/blob first.
-  const serialized = await readTokenCache()
-  if (serialized) {
-    cache.deserialize(serialized)
+function createServerMsalClient(_options?: { persistCache?: boolean }) {
+  return createIdentityMsalClient()
+}
+
+export async function getConfiguredSharePointSiteId(): Promise<string | null> {
+  const config = await getAppConfig()
+  const fromConfig = config.sharePointSiteId?.trim()
+  if (fromConfig) return fromConfig
+  const fromEnv = process.env.SHAREPOINT_SITE_ID?.trim()
+  return fromEnv || null
+}
+
+export async function getSiteDriveBaseUrl(): Promise<string> {
+  const siteId = await getConfiguredSharePointSiteId()
+  if (!siteId) {
+    throw new Error(
+      "SharePoint site is not configured. Open /setup and connect an org SharePoint site."
+    )
   }
-  return cache.getAllAccounts()
+  return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drive`
+}
+
+/**
+ * App-only Graph token. Entra app needs application permission Sites.Selected
+ * (admin consent) plus an explicit grant on the target site.
+ */
+export async function getOneDriveAccessToken() {
+  const result = await getAppOnlyClient().acquireTokenByClientCredential({
+    scopes: ["https://graph.microsoft.com/.default"],
+  })
+  if (!result?.accessToken) {
+    throw new Error("Could not acquire Microsoft Graph app-only access token.")
+  }
+  return result.accessToken
+}
+
+type GraphSite = {
+  id?: string
+  displayName?: string
+  webUrl?: string
+  name?: string
+}
+
+function sharePointSiteApiPath(siteUrlOrId: string): string {
+  const trimmed = siteUrlOrId.trim().replace(/\/$/, "")
+  if (!trimmed) {
+    throw new Error("A SharePoint site URL or site id is required.")
+  }
+
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(trimmed)}`
+  }
+
+  const url = new URL(trimmed)
+  const pathname = url.pathname.replace(/\/$/, "") || "/"
+  return `https://graph.microsoft.com/v1.0/sites/${url.hostname}:${pathname}`
+}
+
+export async function resolveSharePointSite(siteUrlOrId: string): Promise<{
+  siteId: string
+  siteUrl: string
+  siteName: string
+}> {
+  const accessToken = await getOneDriveAccessToken()
+  const api = sharePointSiteApiPath(siteUrlOrId)
+  const site = await fetchGraphJson<GraphSite>(api, accessToken)
+  if (!site.id) {
+    throw new Error("SharePoint site lookup did not return a site id.")
+  }
+  return {
+    siteId: site.id,
+    siteUrl: site.webUrl?.trim() || siteUrlOrId.trim(),
+    siteName:
+      site.displayName?.trim() ||
+      site.name?.trim() ||
+      site.webUrl?.trim() ||
+      site.id,
+  }
+}
+
+export async function connectSharePointSite(siteUrlOrId: string) {
+  const resolved = await resolveSharePointSite(siteUrlOrId)
+  const accessToken = await getOneDriveAccessToken()
+  await fetchGraphJson<{ id?: string }>(
+    `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(resolved.siteId)}/drive?$select=id,webUrl`,
+    accessToken
+  )
+  await updateAppConfig({
+    sharePointSiteId: resolved.siteId,
+    sharePointSiteUrl: resolved.siteUrl,
+    sharePointSiteName: resolved.siteName,
+  })
+  return resolved
 }
 
 export async function getConnectedOneDriveAccount(): Promise<AccountInfo | null> {
-  const accounts = await getStoredAccounts()
-  return accounts[0] ?? null
+  return null
 }
 
 export function oneDriveAccountsMatch(
@@ -1022,10 +1142,67 @@ export function oneDriveAccountsMatch(
 }
 
 export async function getOneDriveConnectionStatus() {
-  const account = await getConnectedOneDriveAccount()
-  return {
-    connected: Boolean(account),
-    username: account?.username ?? null,
+  const config = await getAppConfig()
+  const siteId =
+    config.sharePointSiteId?.trim() ||
+    process.env.SHAREPOINT_SITE_ID?.trim() ||
+    ""
+  const siteUrl =
+    config.sharePointSiteUrl?.trim() ||
+    process.env.SHAREPOINT_SITE_URL?.trim() ||
+    ""
+  const siteName = config.sharePointSiteName?.trim() || ""
+
+  if (!siteId && !siteUrl) {
+    return {
+      connected: false,
+      username: null as string | null,
+      siteId: null as string | null,
+      siteUrl: null as string | null,
+      siteName: null as string | null,
+    }
+  }
+
+  try {
+    if (siteId) {
+      const accessToken = await getOneDriveAccessToken()
+      const site = await fetchGraphJson<GraphSite>(
+        `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}?$select=id,displayName,webUrl,name`,
+        accessToken
+      )
+      const name =
+        site.displayName?.trim() ||
+        site.name?.trim() ||
+        site.webUrl?.trim() ||
+        siteName ||
+        siteId
+      return {
+        connected: true,
+        username: name,
+        siteId: site.id ?? siteId,
+        siteUrl: site.webUrl?.trim() || siteUrl || null,
+        siteName: name,
+      }
+    }
+
+    const resolved = await resolveSharePointSite(siteUrl)
+    return {
+      connected: true,
+      username: resolved.siteName,
+      siteId: resolved.siteId,
+      siteUrl: resolved.siteUrl,
+      siteName: resolved.siteName,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      connected: false,
+      username: null as string | null,
+      siteId: siteId || null,
+      siteUrl: siteUrl || null,
+      siteName: siteName || null,
+      error: message,
+    }
   }
 }
 
@@ -1038,12 +1215,10 @@ export async function getOneDriveLoginUrl(
     }
   }
 ) {
-  const client = getOneDriveClient()
+  const client = getIdentityClient()
   const request: AuthorizationUrlRequest = {
-    scopes: [...graphScopes],
+    scopes: [...identityScopes],
     redirectUri: getOneDriveRedirectUri(req),
-    // Force the account picker so "Change receiving OneDrive" does not silently
-    // reuse the previously signed-in Microsoft session.
     prompt: "select_account",
     codeChallenge,
     codeChallengeMethod: "S256",
@@ -1052,89 +1227,29 @@ export async function getOneDriveLoginUrl(
 }
 
 export async function completeOneDriveLogin(
-  code: string,
-  codeVerifier: string,
-  req?: {
+  _code: string,
+  _codeVerifier: string,
+  _req?: {
     headers: {
       host?: string
       "x-forwarded-proto"?: string | string[]
     }
   }
 ) {
-  const client = getOneDriveClient()
-  const request: AuthorizationCodeRequest = {
-    code,
-    codeVerifier,
-    scopes: [...graphScopes],
-    redirectUri: getOneDriveRedirectUri(req),
-  }
-  const result = await client.acquireTokenByCode(request)
-  const signedIn = result.account
-  if (!signedIn?.homeAccountId) {
-    return result
-  }
-
-  // Keep only the account that just signed in. A stale cache reload can leave the
-  // previous receiving mailbox in memory and getConnectedOneDriveAccount() would
-  // keep returning that older accounts[0].
-  const cache = client.getTokenCache() as {
-    getAllAccounts: () => Promise<AccountInfo[]>
-    removeAccount: (account: AccountInfo) => Promise<void>
-    serialize: () => string
-  }
-  for (const account of await cache.getAllAccounts()) {
-    if (account.homeAccountId !== signedIn.homeAccountId) {
-      await cache.removeAccount(account)
-    }
-  }
-  await writeTokenCache(cache.serialize())
-  return result
-}
-
-export async function getOneDriveAccessToken() {
-  // Use the same scopes as the interactive OneDrive login so the cached
-  // refresh token can be redeemed without a scope mismatch.
-  return getGraphAccessToken([...graphScopes])
-}
-
-async function getGraphAccessToken(scopes: string[]) {
-  const client = getOneDriveClient()
-  const account = await getConnectedOneDriveAccount()
-  if (!account) {
-    throw new Error(
-      "OneDrive is not connected. Visit /setup and sign in with the receiving account."
-    )
-  }
-
-  if (!msalClientSecret) {
-    throw new Error(
-      "Missing AZURE_CLIENT_SECRET. Set it in .env.local / Vercel, restart, then reconnect OneDrive at /setup."
-    )
-  }
-
-  const request: SilentFlowRequest = {
-    account,
-    scopes,
-    forceRefresh: false,
-  }
-
-  try {
-    const result = await client.acquireTokenSilent(request)
-    if (!result?.accessToken) {
-      throw new Error("Could not acquire Microsoft Graph access token.")
-    }
-    return result.accessToken
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
-    throw new Error(
-      `Microsoft session expired. Visit /setup and connect the receiving account again. (${detail})`
-    )
-  }
+  throw new Error(
+    "Receiving destination is a SharePoint site (Sites.Selected), not a user OneDrive login."
+  )
 }
 
 export async function clearOneDriveConnection() {
-  await deleteTokenCache()
-  pca = null
+  await updateAppConfig({
+    sharePointSiteId: "",
+    sharePointSiteUrl: "",
+    sharePointSiteName: "",
+  })
+  await deleteTokenCache().catch(() => undefined)
+  identityClient = null
+  appOnlyClient = null
 }
 
 export async function getUploadAccessLoginUrl(
@@ -1150,7 +1265,7 @@ export async function getUploadAccessLoginUrl(
   const client = createServerMsalClient()
 
   const request: AuthorizationUrlRequest = {
-    scopes: [...graphScopes],
+    scopes: [...identityScopes],
     redirectUri: getUploadAccessRedirectUri(req),
     prompt: "select_account",
     codeChallenge,
@@ -1176,7 +1291,7 @@ export async function verifyUploadAccessIdentity(
   const request: AuthorizationCodeRequest = {
     code,
     codeVerifier,
-    scopes: [...graphScopes],
+    scopes: [...identityScopes],
     redirectUri: getUploadAccessRedirectUri(req),
   }
 
@@ -1371,7 +1486,7 @@ export async function canAccessUploadPortal(req: {
   return {
     allowed: false as const,
     connected: true as const,
-    loginUrl: "/api/auth/upload-access/login",
+    loginUrl: "/api/auth/admin/login",
   }
 }
 
@@ -1384,7 +1499,7 @@ export async function assertUploadPortalAccess(
 
   res.status(401).json({
     error:
-      "Upload access required. Use a parent link or sign in with the receiving OneDrive account.",
+      "Upload access required. Use a parent link or sign in as an allowlisted admin.",
   })
   return false
 }
@@ -1500,8 +1615,9 @@ export async function uploadSmallFileToOneDrive(
 
   const driveItemPath = await buildDriveItemPath(file.name)
   const encodedPath = encodeDrivePath(driveItemPath)
+  const driveBase = await getSiteDriveBaseUrl()
   const res = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/content`,
+    `${driveBase}/root:/${encodedPath}:/content`,
     {
       method: "PUT",
       headers: {
@@ -1530,8 +1646,9 @@ export async function createOneDriveUploadSession(
 ): Promise<OneDriveUploadSession> {
   const driveItemPath = await buildDriveItemPath(filename)
   const encodedPath = encodeDrivePath(driveItemPath)
+  const driveBase = await getSiteDriveBaseUrl()
   const res = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/createUploadSession`,
+    `${driveBase}/root:/${encodedPath}:/createUploadSession`,
     {
       method: "POST",
       headers: {
@@ -1591,12 +1708,13 @@ async function fetchGraphJson<T>(url: string, accessToken: string): Promise<T> {
   return (await res.json()) as T
 }
 
-/** Top-level folders under the connected OneDrive root. */
+/** Top-level folders under the connected SharePoint site drive root. */
 export async function listOneDriveRootFolders(
   accessToken: string
 ): Promise<DriveFolderOption[]> {
+  const driveBase = await getSiteDriveBaseUrl()
   const data = await fetchGraphJson<{ value?: GraphDriveItem[] }>(
-    "https://graph.microsoft.com/v1.0/me/drive/root/children?$select=id,name,folder&$top=200",
+    `${driveBase}/root/children?$select=id,name,folder&$top=200`,
     accessToken
   )
 
@@ -1619,15 +1737,16 @@ async function listDriveChildrenPage(
 }
 
 /**
- * All .xlsx workbooks under the connected OneDrive, found by walking folders.
- * Prefer this over Graph search — search is index-based and often misses
- * newly uploaded files for minutes (or longer).
+ * All .xlsx workbooks under the connected SharePoint site drive, found by
+ * walking folders. Prefer this over Graph search — search is index-based and
+ * often misses newly uploaded files for minutes (or longer).
  */
 export async function listOneDriveWorkbooks(
   accessToken: string
 ): Promise<DriveWorkbookOption[]> {
   const MAX_WORKBOOKS = 200
   const MAX_FOLDERS = 300
+  const driveBase = await getSiteDriveBaseUrl()
 
   const seenNames = new Set<string>()
   const workbooks: DriveWorkbookOption[] = []
@@ -1643,8 +1762,8 @@ export async function listOneDriveWorkbooks(
 
     const childrenPath =
       folderId === "root"
-        ? "https://graph.microsoft.com/v1.0/me/drive/root/children"
-        : `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`
+        ? `${driveBase}/root/children`
+        : `${driveBase}/items/${folderId}/children`
 
     let nextUrl: string | undefined =
       `${childrenPath}?$select=id,name,file,folder&$top=200`
@@ -1809,12 +1928,13 @@ export async function listChildNamesFromReferenceWorkbook(
   const workbook = await findOneDriveWorkbookByName(accessToken, workbookName)
   if (!workbook) {
     throw new Error(
-      `Reference workbook "${workbookName}" was not found in OneDrive.`
+      `Reference workbook "${workbookName}" was not found in the SharePoint site drive.`
     )
   }
 
+  const driveBase = await getSiteDriveBaseUrl()
   const contentRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/items/${workbook.id}/content`,
+    `${driveBase}/items/${workbook.id}/content`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
@@ -1917,47 +2037,8 @@ async function completeUploadAccessFlow(
   code: string,
   codeVerifier: string
 ): Promise<NextResponse> {
-  const clearCookies = CLEAR_AUTH_COOKIES()
-
-  const connectedAccount = await getConnectedOneDriveAccount()
-  if (!connectedAccount?.username) {
-    return redirectWithCookies(
-      request,
-      "/upload-access-denied?error=not_configured",
-      clearCookies
-    )
-  }
-
-  const signedInAccount = await verifyUploadAccessIdentity(
-    code,
-    codeVerifier,
-    shaped
-  )
-  if (!signedInAccount?.username) {
-    return redirectWithCookies(
-      request,
-      "/upload-access-denied?error=missing_account",
-      [...clearCookies, clearUploadAccessCookieHeader()]
-    )
-  }
-
-  if (!oneDriveAccountsMatch(signedInAccount, connectedAccount)) {
-    const wrongAccountParams = new URLSearchParams({
-      error: "wrong_account",
-      signedIn: signedInAccount.username ?? "unknown",
-      expected: connectedAccount.username ?? "unknown",
-    })
-    return redirectWithCookies(
-      request,
-      `/upload-access-denied?${wrongAccountParams.toString()}`,
-      [...clearCookies, clearUploadAccessCookieHeader()]
-    )
-  }
-
-  return redirectWithCookies(request, "/setup", [
-    ...clearCookies,
-    clearUploadAccessCookieHeader(),
-  ])
+  // Same gate as admin — Sites.Selected has no receiving user mailbox to match.
+  return completeAdminFlow(request, shaped, code, codeVerifier)
 }
 
 async function completeAdminFlow(
@@ -2000,50 +2081,15 @@ async function completeAdminFlow(
 
 async function completeSetupFlow(
   request: NextRequest,
-  shaped: RequestShape,
-  code: string,
-  codeVerifier: string
+  _shaped: RequestShape,
+  _code: string,
+  _codeVerifier: string
 ): Promise<NextResponse> {
-  // Only an already-signed-in allowlisted admin may change the receiving account.
-  const actingAdmin = getAdminAccessUsername(shaped.headers.cookie)
-  if (!(await isAllowedAdminEmail(actingAdmin))) {
-    return errorRedirect(request, "setup", "unauthorized_admin")
-  }
-
-  // Drop any previously cached receiving account first. Otherwise MSAL keeps the
-  // old account in the cache and getConnectedOneDriveAccount() keeps returning
-  // accounts[0] (often the previous mailbox) even after a successful new sign-in.
-  await clearOneDriveConnection()
-
-  const result = await completeOneDriveLogin(code, codeVerifier, shaped)
-  const receivingEmail = result.account?.username
-  if (!receivingEmail) {
-    await clearOneDriveConnection()
-    return errorRedirect(request, "setup", "missing_account")
-  }
-
-  // The OneDrive account they signed in with must also be on the admin allowlist.
-  if (!(await isAllowedAdminEmail(receivingEmail))) {
-    await clearOneDriveConnection()
-    const params = new URLSearchParams({
-      error: "onedrive_not_allowlisted",
-      email: receivingEmail,
-    })
-    return redirectWithCookies(
-      request,
-      `/setup?${params.toString()}`,
-      [
-        ...CLEAR_AUTH_COOKIES(),
-        createAdminAccessCookieHeader(actingAdmin as string),
-      ]
-    )
-  }
-
-  // Keep the console session as the acting admin (may differ from receiving account).
-  return redirectWithCookies(request, "/setup?connected=1", [
-    ...CLEAR_AUTH_COOKIES(),
-    createAdminAccessCookieHeader(actingAdmin as string),
-  ])
+  return redirectWithCookies(
+    request,
+    "/setup?error=use_sharepoint_connect",
+    CLEAR_AUTH_COOKIES()
+  )
 }
 
 export async function handleOneDriveOAuthCallback(request: NextRequest) {

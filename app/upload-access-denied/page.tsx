@@ -9,13 +9,13 @@ import {
 } from "@/components/ui/alert"
 
 const errorMessages: Record<string, string> = {
-    not_configured: "No receiving OneDrive account is connected yet.",
+    not_configured: "No SharePoint site is connected yet.",
     missing_account: "We could not read the account you signed in with.",
     missing_code: "The sign-in did not complete. Please try again.",
     missing_pkce_verifier:
         "The sign-in session expired. Please start the link again.",
     wrong_account:
-        "You signed in with a different account than the receiving OneDrive account.",
+        "You signed in with an account that is not on the admin allowlist.",
     unauthorized_admin:
         "This Microsoft account is not authorized to access the admin console. Ask an existing admin to add your email to the allowlist.",
     no_admins_configured:
@@ -60,7 +60,7 @@ export default function UploadAccessDeniedPage() {
                     <AlertTitle>You do not have upload access</AlertTitle>
                     <AlertDescription>
                         {detail ??
-                            "Use a valid parent upload link or sign in with the receiving OneDrive account."}
+                            "Use a valid parent upload link or sign in as an allowlisted admin."}
                     </AlertDescription>
                 </Alert>
                 <Link href="/setup" className="text-sm underline">
