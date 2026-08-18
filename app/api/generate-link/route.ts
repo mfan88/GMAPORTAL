@@ -23,11 +23,16 @@ export async function POST(request: NextRequest) {
         const body = (await request.json()) as {
             childName?: string
             edc?: string
+            scheduledDate?: string | null
         }
 
         const childName =
             typeof body.childName === "string" ? body.childName.trim() : ""
         const edc = typeof body.edc === "string" ? body.edc.trim() : ""
+        const scheduledDate =
+            typeof body.scheduledDate === "string"
+                ? body.scheduledDate.trim()
+                : null
 
         if (!childName) {
             return NextResponse.json(
@@ -45,14 +50,24 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        const [{ token, createdAt, childName: storedName, edc: storedEdc }, config] =
-            await Promise.all([
-                createUploadLink({
-                    childName,
-                    edc,
-                }),
-                getAppConfig(),
-            ])
+        const [
+            {
+                token,
+                createdAt,
+                childName: storedName,
+                edc: storedEdc,
+                scheduledDate: storedScheduledDate,
+                state,
+            },
+            config,
+        ] = await Promise.all([
+            createUploadLink({
+                childName,
+                edc,
+                scheduledDate,
+            }),
+            getAppConfig(),
+        ])
         const origin = getPublicSiteOrigin(toRequestShape(request))
         const url = `${origin}/portalaccess/${token}`
 
@@ -62,6 +77,8 @@ export async function POST(request: NextRequest) {
             createdAt,
             childName: storedName,
             edc: storedEdc,
+            scheduledDate: storedScheduledDate,
+            state,
             expiresInSeconds: linkExpirySeconds(config),
         })
     } catch (error) {

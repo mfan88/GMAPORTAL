@@ -22,6 +22,10 @@ export async function GET(request: NextRequest) {
                 state: link.state,
                 childName: link.childName,
                 edc: link.edc,
+                scheduledDate: link.scheduledDate,
+                bufferStartsAt: link.bufferStartsAt,
+                availableAt: link.availableAt,
+                expiresAt: link.expiresAt,
                 url: `${origin}/portalaccess/${link.token}`,
             })),
         })

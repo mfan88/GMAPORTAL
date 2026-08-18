@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import SettingsCard from "@/components/settingsCard"
+import DatePicker from "@/components/datePicker"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -31,7 +32,7 @@ type ConnectionStatus = {
   tokenStorage?: string
 }
 
-type LinkState = "provisioning" | "pending" | "used"
+type LinkState = "scheduled" | "provisioning" | "pending" | "used"
 
 type UploadLink = {
   token: string
@@ -41,9 +42,11 @@ type UploadLink = {
   state: LinkState
   childName: string | null
   edc: string | null
+  scheduledDate: string | null
 }
 
 const STATE_BADGE: Record<LinkState, { label: string; dot: string }> = {
+  scheduled: { label: "Scheduled", dot: "bg-teal-600" },
   provisioning: { label: "Provisioning", dot: "bg-amber-500" },
   pending: { label: "Pending Upload", dot: "bg-blue-500" },
   used: { label: "Used", dot: "bg-neutral-400" },
@@ -88,8 +91,11 @@ export default function ConsolePage() {
   const [childNamesLoading, setChildNamesLoading] = useState(false)
   const [childNamesError, setChildNamesError] = useState<string | null>(null)
   const [selectedChild, setSelectedChild] = useState<string | null>(null)
-  const [isEDCWrong, setIsEDCWrong] = useState(false)
   const [selectedEdc, setSelectedEdc] = useState<string | null>(null)
+  const [isSchedulingLetter, setIsSchedulingLetter] = useState(false)
+  const [letterScheduleDate, setLetterScheduleDate] = useState<
+    Date | undefined
+  >(undefined)
   const [banner, setBanner] = useState<{
     type: "success" | "error"
     message: string
@@ -264,7 +270,8 @@ export default function ConsolePage() {
         setChildren([])
         setSelectedChild(null)
         setSelectedEdc(null)
-        setIsEDCWrong(false)
+        setIsSchedulingLetter(false)
+        setLetterScheduleDate(undefined)
         setChildNamesError(null)
       })
       .finally(() => setIsDisconnecting(false))
@@ -349,6 +356,18 @@ export default function ConsolePage() {
       return
     }
 
+    if (isSchedulingLetter && !letterScheduleDate) {
+      setBanner({
+        type: "error",
+        message: "Pick the letter schedule date before generating a link.",
+      })
+      return
+    }
+
+    const scheduledDate = isSchedulingLetter
+      ? format(letterScheduleDate!, "yyyy-MM-dd")
+      : null
+
     setIsGenerating(true)
     setBanner(null)
     void fetch("/api/generate-link", {
@@ -357,6 +376,7 @@ export default function ConsolePage() {
       body: JSON.stringify({
         childName: selectedChild,
         edc: selectedEdc,
+        scheduledDate,
       }),
     })
       .then(async (res) => {
@@ -374,10 +394,20 @@ export default function ConsolePage() {
         setBanner({ type: "error", message })
       })
       .finally(() => setIsGenerating(false))
-  }, [loadLinks, selectedChild, selectedEdc])
+  }, [
+    isSchedulingLetter,
+    letterScheduleDate,
+    loadLinks,
+    selectedChild,
+    selectedEdc,
+  ])
 
   const canGenerateLink =
-    connected && Boolean(selectedChild) && Boolean(selectedEdc) && !isGenerating
+    connected &&
+    Boolean(selectedChild) &&
+    Boolean(selectedEdc) &&
+    (!isSchedulingLetter || Boolean(letterScheduleDate)) &&
+    !isGenerating
 
   const childPickerContent = (() => {
     if (!connected) {
@@ -412,7 +442,6 @@ export default function ConsolePage() {
             const nextEdc =
               children.find((child) => child.name === value)?.edc ?? null
             setSelectedChild(value)
-            setIsEDCWrong(false)
             setSelectedEdc(nextEdc)
           }}
         >
@@ -433,36 +462,52 @@ export default function ConsolePage() {
           <p className="text-sm text-black/80">{edcStatement}</p>
         ) : null}
 
+        {selectedChild && !workbookEdc ? (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edc-entry">EDC date</Label>
+            <Input
+              id="edc-entry"
+              type="date"
+              value={selectedEdc ?? ""}
+              onChange={(event) => {
+                setSelectedEdc(event.target.value || null)
+              }}
+            />
+            <p className="text-xs text-black/50">
+              Stored on the link and used to calculate age at upload.
+            </p>
+          </div>
+        ) : null}
+
         {selectedChild ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Checkbox
-                id="is-edc-wrong"
-                checked={isEDCWrong}
+                id="schedule-letter"
+                checked={isSchedulingLetter}
                 onCheckedChange={(checked) => {
-                  const overriding = checked === true
-                  setIsEDCWrong(overriding)
-                  if (!overriding) {
-                    setSelectedEdc(workbookEdc)
+                  const scheduling = checked === true
+                  setIsSchedulingLetter(scheduling)
+                  if (!scheduling) {
+                    setLetterScheduleDate(undefined)
                   }
                 }}
               />
-              <Label htmlFor="is-edc-wrong">Override EDC date</Label>
+              <Label htmlFor="schedule-letter">
+                Are you scheduling the letter?
+              </Label>
             </div>
-            {isEDCWrong || !workbookEdc ? (
+            {isSchedulingLetter ? (
               <div className="flex flex-col gap-1.5">
-                <Input
-                  id="edc-override"
-                  type="date"
-                  value={selectedEdc ?? ""}
-                  onChange={(event) => {
-                    setIsEDCWrong(true)
-                    setSelectedEdc(event.target.value || null)
-                  }}
+                <Label>Letter date</Label>
+                <DatePicker
+                  className="w-full"
+                  date={letterScheduleDate}
+                  setDate={setLetterScheduleDate}
                 />
                 <p className="text-xs text-black/50">
-                  This date is stored on the link and used to calculate age at
-                  upload.
+                  The portal link stays unavailable until this date. On that
+                  day the activation buffer begins.
                 </p>
               </div>
             ) : null}
@@ -645,6 +690,9 @@ export default function ConsolePage() {
                           <span className="text-xs text-black/55">
                             {link.childName}
                             {link.edc ? ` · EDC ${link.edc}` : ""}
+                            {link.scheduledDate
+                              ? ` · Letter ${link.scheduledDate}`
+                              : ""}
                           </span>
                         )}
                       </>

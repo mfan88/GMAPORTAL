@@ -275,11 +275,12 @@ const LINK_PREFIX = "link:"
 
 /**
  * Link lifecycle in the admin console:
- * - "provisioning": created but still inside its activation delay (not usable).
+ * - "scheduled": letter date not reached yet (portal shows expired/not found).
+ * - "provisioning": buffer window after the letter date (not usable yet).
  * - "pending": active and waiting for a parent to upload.
  * - "used": consumed by a successful upload; kept until admin dismisses it.
  */
-export type LinkState = "provisioning" | "pending" | "used"
+export type LinkState = "scheduled" | "provisioning" | "pending" | "used"
 
 export type UploadLink = {
   token: string
@@ -289,10 +290,17 @@ export type UploadLink = {
   childName: string | null
   /** ISO date (YYYY-MM-DD) used to compute age at upload from date recorded. */
   edc: string | null
-  /** Earliest time the parent may upload (createdAt + buffer). */
+  /**
+   * When the activation buffer begins (ms). Defaults to createdAt when the
+   * letter was not scheduled ahead.
+   */
+  bufferStartsAt: number
+  /** Earliest time the parent may upload (bufferStartsAt + buffer). */
   availableAt: number
   /** Latest time the parent may upload (set when the link is created). */
   expiresAt: number
+  /** ISO date (YYYY-MM-DD) when a letter was scheduled, if any. */
+  scheduledDate: string | null
 }
 
 type StoredLink = {
@@ -302,15 +310,55 @@ type StoredLink = {
   edc?: string
   /** Absolute expiry timestamp (ms). Older links may omit this. */
   expiresAt?: number
+  /**
+   * When the buffer countdown begins (ms). Older links omit this and use
+   * createdAt.
+   */
+  bufferStartsAt?: number
+  /** ISO date (YYYY-MM-DD) chosen when scheduling the letter. */
+  scheduledDate?: string
   /** @deprecated Older links stored age at generation; prefer `edc`. */
   ageWeeks?: number
 }
 
-function deriveState(value: StoredLink, bufferTimeMs: number): LinkState {
-  if (typeof value.usedAt === "number") return "used"
-  if (Date.now() < value.createdAt + bufferTimeMs) {
-    return "provisioning"
+function resolveBufferStartsAt(value: StoredLink): number {
+  if (
+    typeof value.bufferStartsAt === "number" &&
+    Number.isFinite(value.bufferStartsAt)
+  ) {
+    return value.bufferStartsAt
   }
+  return value.createdAt
+}
+
+function startOfUtcDayFromIsoDate(isoDate: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim())
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
+  return Date.UTC(year, month - 1, day, 0, 0, 0, 0)
+}
+
+function deriveState(
+  value: StoredLink,
+  bufferTimeMs: number,
+  linkExpiryTimeMs: number
+): LinkState {
+  if (typeof value.usedAt === "number") return "used"
+
+  const bufferStartsAt = resolveBufferStartsAt(value)
+  const availableAt = bufferStartsAt + bufferTimeMs
+  const expiresAt =
+    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
+      ? value.expiresAt
+      : availableAt + linkExpiryTimeMs
+  const now = Date.now()
+
+  if (now >= expiresAt) return "used"
+  if (now < bufferStartsAt) return "scheduled"
+  if (now < availableAt) return "provisioning"
   return "pending"
 }
 
@@ -335,29 +383,35 @@ function toUploadLink(
   bufferTimeMs: number,
   linkExpiryTimeMs: number
 ): UploadLink {
+  const bufferStartsAt = resolveBufferStartsAt(value)
+  const availableAt = bufferStartsAt + bufferTimeMs
   const expiresAt =
     typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
       ? value.expiresAt
-      : value.createdAt + linkExpiryTimeMs
+      : availableAt + linkExpiryTimeMs
 
   return {
     token,
     createdAt: value.createdAt,
     usedAt: value.usedAt ?? null,
-    state: deriveState(value, bufferTimeMs),
+    state: deriveState(value, bufferTimeMs, linkExpiryTimeMs),
     childName:
       typeof value.childName === "string" && value.childName.trim()
         ? value.childName.trim()
         : null,
     edc: parseStoredEdc(value.edc),
-    availableAt: value.createdAt + bufferTimeMs,
+    bufferStartsAt,
+    availableAt,
     expiresAt,
+    scheduledDate: parseStoredEdc(value.scheduledDate),
   }
 }
 
 export async function createUploadLink(input: {
   childName: string
   edc: string
+  /** Optional ISO date (YYYY-MM-DD). Buffer begins at UTC midnight that day. */
+  scheduledDate?: string | null
 }): Promise<UploadLink> {
   const childName = input.childName.trim()
   const edc = parseStoredEdc(input.edc)
@@ -368,18 +422,39 @@ export async function createUploadLink(input: {
     throw new Error("A valid EDC date is required to generate a link.")
   }
 
+  const scheduledDate = input.scheduledDate
+    ? parseStoredEdc(input.scheduledDate)
+    : null
+  let bufferStartsAt = Date.now()
+  if (scheduledDate) {
+    const start = startOfUtcDayFromIsoDate(scheduledDate)
+    if (start === null) {
+      throw new Error("A valid letter schedule date is required.")
+    }
+    bufferStartsAt = start
+  }
+
   const config = await getAppConfig()
   const token = randomUUID()
   const createdAt = Date.now()
+  const availableAt = bufferStartsAt + config.bufferTimeMs
+  const expiresAt = availableAt + config.linkExpiryTimeMs
   const value: StoredLink = {
     createdAt,
     childName,
     edc,
-    expiresAt: createdAt + config.linkExpiryTimeMs,
+    bufferStartsAt,
+    expiresAt,
+    ...(scheduledDate ? { scheduledDate } : {}),
   }
 
+  const ttlSeconds = Math.max(
+    60,
+    Math.ceil((expiresAt - Date.now()) / 1000)
+  )
+
   await getRedis().set(`${LINK_PREFIX}${token}`, value, {
-    ex: linkExpirySeconds(config),
+    ex: ttlSeconds,
   })
 
   return toUploadLink(
@@ -443,10 +518,26 @@ export async function checkUploadLink(token: string): Promise<LinkStatus> {
     return { status: "expired" }
   }
 
-  const { bufferTimeMs } = await getAppConfig()
-  const availableAt = value.createdAt + bufferTimeMs
-  if (Date.now() < availableAt) {
+  const { bufferTimeMs, linkExpiryTimeMs } = await getAppConfig()
+  const bufferStartsAt = resolveBufferStartsAt(value)
+  const availableAt = bufferStartsAt + bufferTimeMs
+  const expiresAt =
+    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
+      ? value.expiresAt
+      : availableAt + linkExpiryTimeMs
+  const now = Date.now()
+
+  // Before the scheduled letter date: same as not found / expired (no countdown).
+  if (now < bufferStartsAt) {
+    return { status: "expired" }
+  }
+
+  if (now < availableAt) {
     return { status: "pending", availableAt }
+  }
+
+  if (now >= expiresAt) {
+    return { status: "expired" }
   }
 
   return { status: "active" }
@@ -461,11 +552,23 @@ export async function getUploadLink(token: string): Promise<UploadLink | null> {
 
 export async function uploadLinkUsable(token: string): Promise<boolean> {
   const value = await getRedis().get<StoredLink>(`${LINK_PREFIX}${token}`)
-  return (
-    value != null &&
-    typeof value.createdAt === "number" &&
-    typeof value.usedAt !== "number"
-  )
+  if (
+    !value ||
+    typeof value.createdAt !== "number" ||
+    typeof value.usedAt === "number"
+  ) {
+    return false
+  }
+
+  const { bufferTimeMs, linkExpiryTimeMs } = await getAppConfig()
+  const bufferStartsAt = resolveBufferStartsAt(value)
+  const availableAt = bufferStartsAt + bufferTimeMs
+  const expiresAt =
+    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
+      ? value.expiresAt
+      : availableAt + linkExpiryTimeMs
+  const now = Date.now()
+  return now >= availableAt && now < expiresAt
 }
 
 export async function consumeUploadLink(token: string): Promise<boolean> {
@@ -482,12 +585,8 @@ export async function consumeUploadLink(token: string): Promise<boolean> {
   }
 
   const updated: StoredLink = {
-    createdAt: value.createdAt,
+    ...value,
     usedAt: Date.now(),
-    childName: value.childName,
-    edc: value.edc,
-    expiresAt: value.expiresAt,
-    ageWeeks: value.ageWeeks,
   }
   await redis.set(key, updated)
   return true
