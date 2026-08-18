@@ -20,10 +20,10 @@ type DriveOption = { id: string; name: string }
 type DurationUnit = "seconds" | "minutes" | "hours" | "days"
 
 const DURATION_UNITS: { value: DurationUnit; label: string }[] = [
-  { value: "seconds", label: "Seconds" },
-  { value: "minutes", label: "Minutes" },
-  { value: "hours", label: "Hours" },
-  { value: "days", label: "Days" },
+  { value: "seconds", label: "s" },
+  { value: "minutes", label: "min" },
+  { value: "hours", label: "hrs" },
+  { value: "days", label: "days" },
 ]
 
 const UNIT_MS: Record<DurationUnit, number> = {
@@ -38,9 +38,11 @@ type SettingsForm = {
   referenceSheetName: string
   childNameColumn: string
   edcColumn: string
-  bufferValue: number
+  /** Digits-only text; empty string means unset / invalid for save. */
+  bufferValue: string
   bufferUnit: DurationUnit
-  expiryValue: number
+  /** Digits-only text; empty string means unset / invalid for save. */
+  expiryValue: string
   expiryUnit: DurationUnit
   allowedAdminEmails: string[]
 }
@@ -48,31 +50,42 @@ type SettingsForm = {
 function msToDuration(
   ms: number,
   options: { allowZero: boolean }
-): { value: number; unit: DurationUnit } {
+): { value: string; unit: DurationUnit } {
   const raw = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0
   if (raw === 0 && options.allowZero) {
-    return { value: 0, unit: "minutes" }
+    return { value: "0", unit: "minutes" }
   }
 
   const positive = Math.max(options.allowZero ? 0 : 1, raw)
   if (positive % UNIT_MS.days === 0) {
-    return { value: positive / UNIT_MS.days, unit: "days" }
+    return { value: String(positive / UNIT_MS.days), unit: "days" }
   }
   if (positive % UNIT_MS.hours === 0) {
-    return { value: positive / UNIT_MS.hours, unit: "hours" }
+    return { value: String(positive / UNIT_MS.hours), unit: "hours" }
   }
   if (positive % UNIT_MS.minutes === 0) {
-    return { value: positive / UNIT_MS.minutes, unit: "minutes" }
+    return { value: String(positive / UNIT_MS.minutes), unit: "minutes" }
   }
   return {
-    value: Math.max(1, Math.round(positive / UNIT_MS.seconds)),
+    value: String(Math.max(1, Math.round(positive / UNIT_MS.seconds))),
     unit: "seconds",
   }
 }
 
-function durationToMs(value: number, unit: DurationUnit) {
-  const amount = Number.isFinite(value) ? value : 0
+function parseDurationInput(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed || !/^\d+$/.test(trimmed)) return null
+  return Number(trimmed)
+}
+
+function durationToMs(value: string, unit: DurationUnit) {
+  const amount = parseDurationInput(value)
+  if (amount === null) return 0
   return Math.max(0, amount) * UNIT_MS[unit]
+}
+
+function digitsOnlyInput(raw: string) {
+  return raw.replace(/\D/g, "")
 }
 
 function normalizeEmail(value: string) {
@@ -93,13 +106,19 @@ function configToForm(config: AppConfig): SettingsForm {
     edcColumn: config.edcColumn,
     bufferValue: buffer.value,
     bufferUnit: buffer.unit,
-    expiryValue: Math.max(1, expiry.value),
+    expiryValue: expiry.value,
     expiryUnit: expiry.unit,
     allowedAdminEmails: [...config.allowedAdminEmails.map(normalizeEmail)],
   }
 }
 
 function formToConfigPatch(form: SettingsForm) {
+  const bufferAmount = parseDurationInput(form.bufferValue)
+  const expiryAmount = parseDurationInput(form.expiryValue)
+  if (bufferAmount === null || expiryAmount === null) {
+    throw new Error("Buffer and link availability require a number.")
+  }
+
   return {
     folderName: form.folderName.trim(),
     referenceSheetName: form.referenceSheetName.trim(),
@@ -129,18 +148,16 @@ function DurationField({
   label,
   value,
   unit,
-  min,
   disabled,
   onValueChange,
   onUnitChange,
 }: Readonly<{
   id: string
   label: string
-  value: number
+  value: string
   unit: DurationUnit
-  min: number
   disabled: boolean
-  onValueChange: (value: number) => void
+  onValueChange: (value: string) => void
   onUnitChange: (unit: DurationUnit) => void
 }>) {
   const unitItems = DURATION_UNITS.map((item) => ({
@@ -154,16 +171,13 @@ function DurationField({
       <div className="flex gap-2">
         <Input
           id={id}
-          type="number"
-          min={min}
-          step={1}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           disabled={disabled}
           value={value}
           onChange={(event) => {
-            const next = Number(event.target.value)
-            onValueChange(
-              Number.isFinite(next) ? Math.max(min, next) : min
-            )
+            onValueChange(digitsOnlyInput(event.target.value))
           }}
           className="min-w-0 flex-1"
         />
@@ -176,7 +190,7 @@ function DurationField({
           }}
           disabled={disabled}
         >
-          <SelectTrigger className="w-[8.5rem] shrink-0" aria-label={`${label} unit`}>
+          <SelectTrigger className="w-[5.5rem] shrink-0" aria-label={`${label} unit`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -378,6 +392,27 @@ export default function SettingsCard({
       onBanner({ type: "error", message: "EDC column is required." })
       return
     }
+    if (parseDurationInput(form.bufferValue) === null) {
+      onBanner({
+        type: "error",
+        message: "Link buffer requires a number (0 or greater).",
+      })
+      return
+    }
+    if (parseDurationInput(form.expiryValue) === null) {
+      onBanner({
+        type: "error",
+        message: "Link availability requires a number.",
+      })
+      return
+    }
+    if (parseDurationInput(form.expiryValue) === 0) {
+      onBanner({
+        type: "error",
+        message: "Link availability must be greater than 0.",
+      })
+      return
+    }
     if (form.allowedAdminEmails.length === 0) {
       onBanner({
         type: "error",
@@ -561,7 +596,6 @@ export default function SettingsCard({
               label="Link buffer"
               value={form.bufferValue}
               unit={form.bufferUnit}
-              min={0}
               disabled={!editing}
               onValueChange={(value) => {
                 setForm((prev) =>
@@ -579,7 +613,6 @@ export default function SettingsCard({
               label="Link availability"
               value={form.expiryValue}
               unit={form.expiryUnit}
-              min={1}
               disabled={!editing}
               onValueChange={(value) => {
                 setForm((prev) =>
