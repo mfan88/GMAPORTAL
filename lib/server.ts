@@ -1608,7 +1608,12 @@ async function parseGraphError(res: Response) {
   const details = await res.text()
   if (details.includes("SPO license")) {
     throw new Error(
-      "This Microsoft account cannot write to OneDrive (missing SharePoint/OneDrive license). Connect a different account at /setup."
+      "This Microsoft account cannot write to SharePoint (missing license). Use an org site the app can access."
+    )
+  }
+  if (res.status === 403 || /accessDenied/i.test(details)) {
+    throw new Error(
+      "SharePoint access denied (403). In Entra, grant application Sites.Selected + admin consent, then grant this app the write role on the target site via Graph POST /sites/{siteId}/permissions. Connecting the site only verifies the site exists — uploads need an explicit site write grant."
     )
   }
   throw new Error(
