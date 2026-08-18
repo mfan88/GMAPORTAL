@@ -1432,6 +1432,23 @@ export function clearUploadAccessCookieHeader() {
   return `${UPLOAD_ACCESS_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`
 }
 
+/** Alias — admin sessions use the same signed cookie as portal access. */
+export function clearAdminAccessCookieHeader() {
+  return clearUploadAccessCookieHeader()
+}
+
+/**
+ * Microsoft end-session URL so the next /setup login can pick another account.
+ */
+export function getMicrosoftLogoutUrl(postLogoutRedirectUri: string) {
+  const authority = azureTenantId
+    ? `https://login.microsoftonline.com/${azureTenantId}`
+    : "https://login.microsoftonline.com/organizations"
+  const url = new URL(`${authority}/oauth2/v2.0/logout`)
+  url.searchParams.set("post_logout_redirect_uri", postLogoutRedirectUri)
+  return url.toString()
+}
+
 function getPortalAccessToken(cookieHeader: string | undefined) {
   const payload = readAccessPayload(cookieHeader)
   return payload?.type === "portal" ? payload.token : null

@@ -462,7 +462,7 @@ export default function ConsolePage() {
 
   return (
     <div className="min-h-screen w-full bg-white text-black">
-      <header className="box-border h-24 p-4">
+      <header className="box-border flex h-24 items-center justify-between gap-4 p-4">
         <Image
           className="h-full w-auto"
           src="/images/dda-logo.svg"
@@ -470,6 +470,15 @@ export default function ConsolePage() {
           width={1338}
           height={472}
         />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            window.location.assign("/api/auth/admin/logout")
+          }}
+        >
+          Sign out
+        </Button>
       </header>
 
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pb-16">
