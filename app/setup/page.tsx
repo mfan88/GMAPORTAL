@@ -26,6 +26,7 @@ type ConnectionStatus = {
   siteId?: string | null
   siteUrl?: string | null
   siteName?: string | null
+  writeAccess?: boolean
   error?: string
   tokenStorage?: string
 }
@@ -156,11 +157,19 @@ export default function ConsolePage() {
 
     const params = new URLSearchParams(window.location.search)
     const connectedParam = params.get("connected") === "1"
+    const grantedParam = params.get("granted") === "1"
     const errorParam = params.get("error")
     let bannerTimeout: number | undefined
-    if (connectedParam || errorParam) {
+    if (connectedParam || grantedParam || errorParam) {
       bannerTimeout = window.setTimeout(() => {
-        if (connectedParam) {
+        if (grantedParam) {
+          setBanner({
+            type: "success",
+            message:
+              "App write access granted on the SharePoint site. Uploads should work now.",
+          })
+          loadStatus()
+        } else if (connectedParam) {
           setBanner({
             type: "success",
             message: "SharePoint site connected and ready to receive uploads.",
@@ -175,6 +184,8 @@ export default function ConsolePage() {
               "We could not read the Microsoft account you signed in with.",
             use_sharepoint_connect:
               "Connect a SharePoint site from this page instead of signing in a personal OneDrive account.",
+            site_not_connected:
+              "Connect a SharePoint site first, then grant write access.",
           }
           setBanner({
             type: "error",
@@ -290,8 +301,9 @@ export default function ConsolePage() {
       })
       setBanner({
         type: "success",
-        message: "SharePoint site connected and ready to receive uploads.",
+        message: "SharePoint site connected. Next: grant write access if prompted.",
       })
+      loadStatus()
       loadChildNames()
     } catch (error) {
       const message =
@@ -523,10 +535,10 @@ export default function ConsolePage() {
               </p>
             ) : null}
             <p className="mt-1 text-xs text-black/45">
-              Org-only mode uses application permission Sites.Selected. Grant
-              this app write access to one SharePoint site in Entra/Graph, then
-              paste that site URL here. Admin console login still uses
-              allowlisted work accounts (User.Read only).
+              Connect your org SharePoint site, then use{" "}
+              <span className="font-medium">Grant write access</span> so this
+              app can upload (Sites.Selected). That step signs you in once as a
+              SharePoint admin; the elevated token is not stored.
             </p>
 
             {!connected && (
@@ -543,6 +555,14 @@ export default function ConsolePage() {
               </div>
             )}
 
+            {connected && status?.writeAccess !== true ? (
+              <p className="mt-2 text-xs text-amber-700">
+                Site is connected, but the app cannot write yet. Click Grant
+                write access (requires Entra delegated Sites.FullControl.All +
+                a SharePoint/Global admin).
+              </p>
+            ) : null}
+
             <div className="mt-3 flex flex-wrap gap-2">
               {!connected ? (
                 <Button
@@ -555,14 +575,28 @@ export default function ConsolePage() {
                   {isConnectingSite ? "Connecting..." : "Connect SharePoint site"}
                 </Button>
               ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={isDisconnecting}
-                  onClick={disconnect}
-                >
-                  {isDisconnecting ? "Disconnecting..." : "Disconnect site"}
-                </Button>
+                <>
+                  {status?.writeAccess !== true ? (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        window.location.assign(
+                          "/api/auth/sharepoint/grant-access"
+                        )
+                      }}
+                    >
+                      Grant write access
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isDisconnecting}
+                    onClick={disconnect}
+                  >
+                    {isDisconnecting ? "Disconnecting..." : "Disconnect site"}
+                  </Button>
+                </>
               )}
             </div>
 

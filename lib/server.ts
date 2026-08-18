@@ -536,7 +536,7 @@ export function createPkcePair() {
 export const PKCE_COOKIE_NAME = "onedrive_pkce"
 export const AUTH_FLOW_COOKIE_NAME = "onedrive_auth_flow"
 
-export type OneDriveAuthFlow = "setup" | "upload-access" | "admin"
+export type OneDriveAuthFlow = "setup" | "upload-access" | "admin" | "site-grant"
 
 function buildCookie(name: string, value: string, maxAgeSeconds: number) {
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}`
@@ -609,7 +609,8 @@ export function getAuthFlowCookie(req: {
       if (
         value === "setup" ||
         value === "upload-access" ||
-        value === "admin"
+        value === "admin" ||
+        value === "site-grant"
       ) {
         return value
       }
@@ -649,6 +650,13 @@ type ServerMsalClient =
 
 /** Interactive sign-in scope for admin / upload-access identity checks only. */
 export const identityScopes = ["User.Read"] as const
+
+/**
+ * One-time admin flow to grant this app write on the connected site.
+ * Requires Entra delegated Sites.FullControl.All + admin consent.
+ * Token is not persisted — only used to POST /sites/{id}/permissions.
+ */
+export const siteGrantScopes = ["User.Read", "Sites.FullControl.All"] as const
 
 /** @deprecated Use identityScopes. Kept as an alias for older imports. */
 export const graphScopes = identityScopes
@@ -1160,6 +1168,7 @@ export async function getOneDriveConnectionStatus() {
       siteId: null as string | null,
       siteUrl: null as string | null,
       siteName: null as string | null,
+      writeAccess: false as boolean,
     }
   }
 
@@ -1176,22 +1185,26 @@ export async function getOneDriveConnectionStatus() {
         site.webUrl?.trim() ||
         siteName ||
         siteId
+      const writeAccess = await probeSharePointWriteAccess()
       return {
         connected: true,
         username: name,
         siteId: site.id ?? siteId,
         siteUrl: site.webUrl?.trim() || siteUrl || null,
         siteName: name,
+        writeAccess,
       }
     }
 
     const resolved = await resolveSharePointSite(siteUrl)
+    const writeAccess = await probeSharePointWriteAccess()
     return {
       connected: true,
       username: resolved.siteName,
       siteId: resolved.siteId,
       siteUrl: resolved.siteUrl,
       siteName: resolved.siteName,
+      writeAccess,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -1201,6 +1214,7 @@ export async function getOneDriveConnectionStatus() {
       siteId: siteId || null,
       siteUrl: siteUrl || null,
       siteName: siteName || null,
+      writeAccess: false as boolean,
       error: message,
     }
   }
@@ -1297,6 +1311,126 @@ export async function verifyUploadAccessIdentity(
 
   const result = await client.acquireTokenByCode(request)
   return result.account ?? null
+}
+
+export async function getSiteGrantLoginUrl(
+  codeChallenge: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  }
+) {
+  const client = createServerMsalClient()
+  const request: AuthorizationUrlRequest = {
+    scopes: [...siteGrantScopes],
+    redirectUri: getUploadAccessRedirectUri(req),
+    // Prefer consent so Sites.FullControl.All is approved when first used.
+    prompt: "select_account",
+    codeChallenge,
+    codeChallengeMethod: "S256",
+  }
+  return client.getAuthCodeUrl(request)
+}
+
+async function acquireSiteGrantToken(
+  code: string,
+  codeVerifier: string,
+  req?: {
+    headers: {
+      host?: string
+      "x-forwarded-proto"?: string | string[]
+    }
+  }
+) {
+  const client = createServerMsalClient()
+  const request: AuthorizationCodeRequest = {
+    code,
+    codeVerifier,
+    scopes: [...siteGrantScopes],
+    redirectUri: getUploadAccessRedirectUri(req),
+  }
+  return client.acquireTokenByCode(request)
+}
+
+/**
+ * Uses a short-lived admin delegated token to grant this app write on the site.
+ * Does not store the admin FullControl token.
+ */
+export async function grantSharePointAppWriteAccess(
+  adminAccessToken: string,
+  siteId: string
+) {
+  ensureClientId()
+  const displayName =
+    process.env.AZURE_APP_DISPLAY_NAME?.trim() || "GMA Upload Portal"
+
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/permissions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminAccessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        roles: ["write"],
+        grantedToIdentities: [
+          {
+            application: {
+              id: msalClientId,
+              displayName,
+            },
+          },
+        ],
+      }),
+    }
+  )
+
+  if (res.ok) return
+
+  const details = await res.text()
+  // Already granted is fine — treat as success when the message indicates conflict.
+  if (
+    res.status === 409 ||
+    /already exists|permission.*exist/i.test(details)
+  ) {
+    return
+  }
+
+  throw new Error(
+    `Could not grant app write on the SharePoint site (${res.status}): ${
+      details || res.statusText
+    }. Sign in as a SharePoint/Global admin, and ensure the Entra app has delegated Sites.FullControl.All with admin consent.`
+  )
+}
+
+/** True when app-only Sites.Selected can create an upload session (needs write). */
+export async function probeSharePointWriteAccess(): Promise<boolean> {
+  try {
+    const accessToken = await getOneDriveAccessToken()
+    const driveBase = await getSiteDriveBaseUrl()
+    const res = await fetch(
+      `${driveBase}/root:/gma-write-probe.tmp:/createUploadSession`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          item: {
+            "@microsoft.graph.conflictBehavior": "replace",
+            name: "gma-write-probe.tmp",
+          },
+        }),
+      }
+    )
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 // ===========================================================================
@@ -2053,6 +2187,59 @@ function errorRedirect(
   return redirectWithCookies(request, destination, CLEAR_AUTH_COOKIES())
 }
 
+async function completeSiteGrantFlow(
+  request: NextRequest,
+  shaped: RequestShape,
+  code: string,
+  codeVerifier: string
+): Promise<NextResponse> {
+  const clearCookies = CLEAR_AUTH_COOKIES()
+  const result = await acquireSiteGrantToken(code, codeVerifier, shaped)
+  const username = result.account?.username
+  if (!username || !result.accessToken) {
+    return redirectWithCookies(
+      request,
+      "/setup?error=missing_account",
+      clearCookies
+    )
+  }
+
+  const adminRejection = await adminAllowlistRejectionReason(username)
+  if (adminRejection) {
+    return redirectWithCookies(
+      request,
+      `/setup?error=${adminRejection}`,
+      clearCookies
+    )
+  }
+
+  const siteId = await getConfiguredSharePointSiteId()
+  if (!siteId) {
+    return redirectWithCookies(
+      request,
+      "/setup?error=site_not_connected",
+      [...clearCookies, createAdminAccessCookieHeader(username)]
+    )
+  }
+
+  try {
+    await grantSharePointAppWriteAccess(result.accessToken, siteId)
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "grant_failed"
+    return redirectWithCookies(
+      request,
+      `/setup?error=${encodeURIComponent(message)}`,
+      [...clearCookies, createAdminAccessCookieHeader(username)]
+    )
+  }
+
+  return redirectWithCookies(request, "/setup?granted=1", [
+    ...clearCookies,
+    createAdminAccessCookieHeader(username),
+  ])
+}
+
 async function completeUploadAccessFlow(
   request: NextRequest,
   shaped: RequestShape,
@@ -2138,6 +2325,9 @@ export async function handleOneDriveOAuthCallback(request: NextRequest) {
   }
 
   try {
+    if (flow === "site-grant") {
+      return await completeSiteGrantFlow(request, shaped, code, codeVerifier)
+    }
     if (flow === "upload-access") {
       return await completeUploadAccessFlow(
         request,
