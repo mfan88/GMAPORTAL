@@ -518,7 +518,8 @@ export default function SettingsCard({
               </SelectContent>
             </Select>
             <p className="text-xs text-black/45">
-              Root folders in the connected SharePoint site.
+              Document libraries and root folders on the connected SharePoint
+              site.
             </p>
           </div>
 

@@ -1141,6 +1141,80 @@ export async function getSiteDriveBaseUrl(): Promise<string> {
   return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drive`
 }
 
+function driveBaseFromId(driveId: string) {
+  return `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}`
+}
+
+type GraphDrive = {
+  id?: string
+  name?: string
+  driveType?: string
+}
+
+async function listSiteDrives(accessToken: string): Promise<GraphDrive[]> {
+  const siteId = await getConfiguredSharePointSiteId()
+  if (!siteId) {
+    throw new Error(
+      "SharePoint site is not configured. Open /setup and connect an org SharePoint site."
+    )
+  }
+
+  const drives: GraphDrive[] = []
+  let nextUrl: string | undefined =
+    `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drives?$select=id,name,driveType&$top=50`
+
+  while (nextUrl) {
+    const page: {
+      value?: GraphDrive[]
+      "@odata.nextLink"?: string
+    } = await fetchGraphJson(nextUrl, accessToken)
+    drives.push(...(page.value ?? []))
+    nextUrl = page["@odata.nextLink"]
+  }
+
+  return drives.filter((drive) => Boolean(drive.id && drive.name))
+}
+
+/**
+ * Resolve where uploads go. `folderName` may be a document library (drive)
+ * name, a library-relative path like "GMA Video/Inbox", or a folder under
+ * the site's default Documents library.
+ */
+async function resolveUploadLocation(filename: string): Promise<{
+  driveBase: string
+  itemPath: string
+}> {
+  const { folderName } = await getAppConfig()
+  const folder = folderName.trim()
+  const defaultDrive = await getSiteDriveBaseUrl()
+
+  if (!folder) {
+    return { driveBase: defaultDrive, itemPath: filename }
+  }
+
+  const accessToken = await getOneDriveAccessToken()
+  const drives = await listSiteDrives(accessToken)
+  const slash = folder.indexOf("/")
+  if (slash > 0) {
+    const libraryName = folder.slice(0, slash)
+    const rest = folder.slice(slash + 1)
+    const library = drives.find((drive) => drive.name === libraryName)
+    if (library?.id) {
+      return {
+        driveBase: driveBaseFromId(library.id),
+        itemPath: `${rest}/${filename}`,
+      }
+    }
+  }
+
+  const library = drives.find((drive) => drive.name === folder)
+  if (library?.id) {
+    return { driveBase: driveBaseFromId(library.id), itemPath: filename }
+  }
+
+  return { driveBase: defaultDrive, itemPath: `${folder}/${filename}` }
+}
+
 /**
  * App-only Graph token. Entra app needs application permission Sites.Selected
  * (admin consent) plus an explicit grant on the target site.
@@ -1509,9 +1583,12 @@ export async function grantSharePointAppWriteAccess(
 export async function probeSharePointWriteAccess(): Promise<boolean> {
   try {
     const accessToken = await getOneDriveAccessToken()
-    const driveBase = await getSiteDriveBaseUrl()
+    const { driveBase, itemPath } = await resolveUploadLocation(
+      "gma-write-probe.tmp"
+    )
+    const encodedPath = encodeDrivePath(itemPath)
     const res = await fetch(
-      `${driveBase}/root:/gma-write-probe.tmp:/createUploadSession`,
+      `${driveBase}/root:/${encodedPath}:/createUploadSession`,
       {
         method: "POST",
         headers: {
@@ -1763,8 +1840,8 @@ function encodeDrivePath(drivePath: string) {
 }
 
 export async function buildDriveItemPath(filename: string) {
-  const { folderName } = await getAppConfig()
-  return `${folderName}/${filename}`
+  const location = await resolveUploadLocation(filename)
+  return location.itemPath
 }
 
 export function sanitizeUploadFilename(filename: string) {
@@ -1868,9 +1945,8 @@ export async function uploadSmallFileToOneDrive(
     )
   }
 
-  const driveItemPath = await buildDriveItemPath(file.name)
-  const encodedPath = encodeDrivePath(driveItemPath)
-  const driveBase = await getSiteDriveBaseUrl()
+  const { driveBase, itemPath } = await resolveUploadLocation(file.name)
+  const encodedPath = encodeDrivePath(itemPath)
   const res = await fetch(
     `${driveBase}/root:/${encodedPath}:/content`,
     {
@@ -1899,9 +1975,8 @@ export async function createOneDriveUploadSession(
   accessToken: string,
   filename: string
 ): Promise<OneDriveUploadSession> {
-  const driveItemPath = await buildDriveItemPath(filename)
-  const encodedPath = encodeDrivePath(driveItemPath)
-  const driveBase = await getSiteDriveBaseUrl()
+  const { driveBase, itemPath } = await resolveUploadLocation(filename)
+  const encodedPath = encodeDrivePath(itemPath)
   const res = await fetch(
     `${driveBase}/root:/${encodedPath}:/createUploadSession`,
     {
@@ -1943,6 +2018,7 @@ export type DriveFolderOption = {
 export type DriveWorkbookOption = {
   id: string
   name: string
+  driveId?: string
 }
 
 type GraphDriveItem = {
@@ -1963,20 +2039,70 @@ async function fetchGraphJson<T>(url: string, accessToken: string): Promise<T> {
   return (await res.json()) as T
 }
 
-/** Top-level folders under the connected SharePoint site drive root. */
+async function listDriveRootFolders(
+  driveId: string,
+  accessToken: string
+): Promise<DriveFolderOption[]> {
+  const folders: DriveFolderOption[] = []
+  let nextUrl: string | undefined =
+    `${driveBaseFromId(driveId)}/root/children?$select=id,name,folder&$top=200`
+
+  while (nextUrl) {
+    const page: {
+      value?: GraphDriveItem[]
+      "@odata.nextLink"?: string
+    } = await fetchGraphJson(nextUrl, accessToken)
+    for (const item of page.value ?? []) {
+      if (item.folder && typeof item.name === "string" && item.id) {
+        folders.push({ id: item.id, name: item.name })
+      }
+    }
+    nextUrl = page["@odata.nextLink"]
+  }
+
+  return folders
+}
+
+/**
+ * Document libraries on the site, plus root folders inside each library.
+ * SharePoint libraries are drives, not children of the default Documents library.
+ */
 export async function listOneDriveRootFolders(
   accessToken: string
 ): Promise<DriveFolderOption[]> {
-  const driveBase = await getSiteDriveBaseUrl()
-  const data = await fetchGraphJson<{ value?: GraphDriveItem[] }>(
-    `${driveBase}/root/children?$select=id,name,folder&$top=200`,
-    accessToken
-  )
+  const drives = await listSiteDrives(accessToken)
+  const options: DriveFolderOption[] = []
+  const seen = new Set<string>()
 
-  return (data.value ?? [])
-    .filter((item) => item.folder && typeof item.name === "string" && item.id)
-    .map((item) => ({ id: item.id as string, name: item.name as string }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+  for (const drive of drives) {
+    if (!drive.id || !drive.name || seen.has(drive.name)) continue
+    seen.add(drive.name)
+    options.push({ id: drive.id, name: drive.name })
+  }
+
+  for (const drive of drives) {
+    if (!drive.id || !drive.name) continue
+    let nested: DriveFolderOption[] = []
+    try {
+      nested = await listDriveRootFolders(drive.id, accessToken)
+    } catch {
+      continue
+    }
+    for (const folder of nested) {
+      if (!seen.has(folder.name)) {
+        seen.add(folder.name)
+        options.push(folder)
+        continue
+      }
+      const qualified = `${drive.name}/${folder.name}`
+      if (!seen.has(qualified)) {
+        seen.add(qualified)
+        options.push({ id: folder.id, name: qualified })
+      }
+    }
+  }
+
+  return options.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 type GraphChildrenPage = {
@@ -2001,56 +2127,70 @@ export async function listOneDriveWorkbooks(
 ): Promise<DriveWorkbookOption[]> {
   const MAX_WORKBOOKS = 200
   const MAX_FOLDERS = 300
-  const driveBase = await getSiteDriveBaseUrl()
+  const drives = await listSiteDrives(accessToken)
 
   const seenNames = new Set<string>()
   const workbooks: DriveWorkbookOption[] = []
-  const folderQueue: string[] = ["root"]
-  const visitedFolders = new Set<string>()
 
-  while (folderQueue.length > 0 && workbooks.length < MAX_WORKBOOKS) {
-    if (visitedFolders.size >= MAX_FOLDERS) break
+  for (const drive of drives) {
+    if (!drive.id || workbooks.length >= MAX_WORKBOOKS) break
 
-    const folderId = folderQueue.shift()
-    if (!folderId || visitedFolders.has(folderId)) continue
-    visitedFolders.add(folderId)
+    const driveBase = driveBaseFromId(drive.id)
+    const folderQueue: string[] = ["root"]
+    const visitedFolders = new Set<string>()
 
-    const childrenPath =
-      folderId === "root"
-        ? `${driveBase}/root/children`
-        : `${driveBase}/items/${folderId}/children`
+    try {
+    while (folderQueue.length > 0 && workbooks.length < MAX_WORKBOOKS) {
+      if (visitedFolders.size >= MAX_FOLDERS) break
 
-    let nextUrl: string | undefined =
-      `${childrenPath}?$select=id,name,file,folder&$top=200`
+      const folderId = folderQueue.shift()
+      if (!folderId || visitedFolders.has(folderId)) continue
+      visitedFolders.add(folderId)
 
-    while (nextUrl && workbooks.length < MAX_WORKBOOKS) {
-      const page = await listDriveChildrenPage(nextUrl, accessToken)
+      const childrenPath =
+        folderId === "root"
+          ? `${driveBase}/root/children`
+          : `${driveBase}/items/${folderId}/children`
 
-      for (const item of page.value ?? []) {
-        if (typeof item.id !== "string" || typeof item.name !== "string") {
-          continue
-        }
+      let nextUrl: string | undefined =
+        `${childrenPath}?$select=id,name,file,folder&$top=200`
 
-        if (item.folder) {
-          if (
-            !visitedFolders.has(item.id) &&
-            visitedFolders.size + folderQueue.length < MAX_FOLDERS
-          ) {
-            folderQueue.push(item.id)
+      while (nextUrl && workbooks.length < MAX_WORKBOOKS) {
+        const page = await listDriveChildrenPage(nextUrl, accessToken)
+
+        for (const item of page.value ?? []) {
+          if (typeof item.id !== "string" || typeof item.name !== "string") {
+            continue
           }
-          continue
+
+          if (item.folder) {
+            if (
+              !visitedFolders.has(item.id) &&
+              visitedFolders.size + folderQueue.length < MAX_FOLDERS
+            ) {
+              folderQueue.push(item.id)
+            }
+            continue
+          }
+
+          if (!item.file) continue
+          if (!item.name.toLowerCase().endsWith(".xlsx")) continue
+          if (seenNames.has(item.name)) continue
+
+          seenNames.add(item.name)
+          workbooks.push({
+            id: item.id,
+            name: item.name,
+            driveId: drive.id,
+          })
+          if (workbooks.length >= MAX_WORKBOOKS) break
         }
 
-        if (!item.file) continue
-        if (!item.name.toLowerCase().endsWith(".xlsx")) continue
-        if (seenNames.has(item.name)) continue
-
-        seenNames.add(item.name)
-        workbooks.push({ id: item.id, name: item.name })
-        if (workbooks.length >= MAX_WORKBOOKS) break
+        nextUrl = page["@odata.nextLink"]
       }
-
-      nextUrl = page["@odata.nextLink"]
+    }
+    } catch {
+      continue
     }
   }
 
@@ -2183,11 +2323,13 @@ export async function listChildNamesFromReferenceWorkbook(
   const workbook = await findOneDriveWorkbookByName(accessToken, workbookName)
   if (!workbook) {
     throw new Error(
-      `Reference workbook "${workbookName}" was not found in the SharePoint site drive.`
+      `Reference workbook "${workbookName}" was not found in the SharePoint site.`
     )
   }
 
-  const driveBase = await getSiteDriveBaseUrl()
+  const driveBase = workbook.driveId
+    ? driveBaseFromId(workbook.driveId)
+    : await getSiteDriveBaseUrl()
   const contentRes = await fetch(
     `${driveBase}/items/${workbook.id}/content`,
     {

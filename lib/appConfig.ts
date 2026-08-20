@@ -2,7 +2,7 @@
  * App/Upload Settings
  */
 export type AppConfig = {
-  folderName: string // Folder under the SharePoint site drive that receives uploads
+  folderName: string // Document library or folder that receives uploads
   bufferTimeMs: number // How long after creation before a link becomes usable (ms)
   linkExpiryTimeMs: number
   fileDetails: {
