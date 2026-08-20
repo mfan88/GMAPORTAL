@@ -58,4 +58,4 @@ In-app public pages: `/info`, `/privacy`, `/tos`.
 
 Marcus Fan in collaboration with the Developmental Disabilities Association.
 
-Support: [support@marcusfan.dev](mailto:support@marcusfan.dev)
+Support: [support@fenna.tech](mailto:support@fenna.tech)
