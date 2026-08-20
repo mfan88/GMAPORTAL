@@ -26,8 +26,6 @@ Collecting assessment videos is usually slow and messy: large files bounce off e
 - **Immediate follow-up.** Staff can receive an email with a direct link as soon as a video lands.
 - **Phone-friendly.** Parents can upload from the device they already used to record.
 
-![Public information page](docs/screenshots/info-page.png)
-
 ## How it works
 
 1. Staff pick a child and create a time-limited upload link.
