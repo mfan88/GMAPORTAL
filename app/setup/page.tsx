@@ -1,7 +1,7 @@
 "use client"
 import Image from "next/image"
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
 import { Check, LinkIcon, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,7 @@ import DatePicker from "@/components/datePicker"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import type { AppConfig } from "@/lib/appConfig"
 
 type ConnectionStatus = {
   connected: boolean
@@ -100,6 +101,9 @@ export default function ConsolePage() {
     type: "success" | "error"
     message: string
   } | null>(null)
+  const [allowedAdminEmails, setAllowedAdminEmails] = useState<string[]>([])
+  const [uploadNotificationEmail, setUploadNotificationEmail] = useState("")
+  const [notificationSaving, setNotificationSaving] = useState(false)
 
   const loadStatus = useCallback(() => {
     void fetch("/api/auth/onedrive/status")
@@ -119,6 +123,56 @@ export default function ConsolePage() {
       })
       .catch(() => setLinks([]))
   }, [])
+
+  const loadConfig = useCallback(() => {
+    void fetch("/api/config")
+      .then(async (res) => {
+        const data = (await res.json()) as AppConfig & { error?: string }
+        if (!res.ok) {
+          throw new Error(data.error ?? "Could not load settings")
+        }
+        setAllowedAdminEmails(data.allowedAdminEmails ?? [])
+        setUploadNotificationEmail(data.uploadNotificationEmail ?? "")
+      })
+      .catch(() => {
+        setAllowedAdminEmails([])
+        setUploadNotificationEmail("")
+      })
+  }, [])
+
+  const saveNotificationEmail = useCallback(
+    async (email: string) => {
+      const previous = uploadNotificationEmail
+      setUploadNotificationEmail(email)
+      setNotificationSaving(true)
+      setBanner(null)
+      try {
+        const res = await fetch("/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uploadNotificationEmail: email }),
+        })
+        const data = (await res.json()) as AppConfig & { error?: string }
+        if (!res.ok) {
+          throw new Error(data.error ?? "Could not save notification email")
+        }
+        setAllowedAdminEmails(data.allowedAdminEmails ?? [])
+        setUploadNotificationEmail(data.uploadNotificationEmail ?? "")
+      } catch (error) {
+        setUploadNotificationEmail(previous)
+        setBanner({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not save notification email",
+        })
+      } finally {
+        setNotificationSaving(false)
+      }
+    },
+    [uploadNotificationEmail]
+  )
 
   const loadChildNames = useCallback(() => {
     setChildNamesLoading(true)
@@ -156,6 +210,7 @@ export default function ConsolePage() {
   useEffect(() => {
     loadStatus()
     loadLinks()
+    loadConfig()
 
     // Poll so link states (Provisioning -> Pending Upload -> Used) stay
     // current without a manual refresh.
@@ -207,7 +262,7 @@ export default function ConsolePage() {
         window.clearTimeout(bannerTimeout)
       }
     }
-  }, [loadStatus, loadLinks])
+  }, [loadStatus, loadLinks, loadConfig])
 
   const portalLinkUrl = useCallback((token: string) => {
     return `${window.location.origin}/portalaccess/${encodeURIComponent(token)}`
@@ -322,6 +377,18 @@ export default function ConsolePage() {
   }, [loadChildNames, siteUrlInput])
 
   const connected = Boolean(status?.connected)
+
+  const notificationEmailItems = useMemo(() => {
+    const emails = new Set(allowedAdminEmails)
+    const extras =
+      uploadNotificationEmail && !emails.has(uploadNotificationEmail)
+        ? [uploadNotificationEmail]
+        : []
+    return [...extras, ...allowedAdminEmails].map((email) => ({
+      label: email,
+      value: email,
+    }))
+  }, [allowedAdminEmails, uploadNotificationEmail])
 
   useEffect(() => {
     if (!connected) return
@@ -645,6 +712,42 @@ export default function ConsolePage() {
               )}
             </div>
 
+            <div className="mt-4 flex flex-col gap-1.5">
+              <Label htmlFor="notification-email">
+                Upload notification email
+              </Label>
+              <Select
+                items={notificationEmailItems}
+                value={uploadNotificationEmail || null}
+                onValueChange={(value) => {
+                  if (typeof value !== "string") return
+                  if (value === uploadNotificationEmail) return
+                  void saveNotificationEmail(value)
+                }}
+                disabled={
+                  notificationSaving || notificationEmailItems.length === 0
+                }
+              >
+                <SelectTrigger id="notification-email" className="w-full">
+                  <SelectValue placeholder="Select an allowlisted email" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {notificationEmailItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-black/45">
+                {notificationEmailItems.length === 0
+                  ? "Add allowed admin emails in Settings first."
+                  : "This address receives a message when a parent upload succeeds."}
+              </p>
+            </div>
+
             <Separator className="my-4" />
 
             <div className="flex items-center justify-between">
@@ -749,7 +852,10 @@ export default function ConsolePage() {
           <SettingsCard
             connected={connected}
             onBanner={setBanner}
-            onConfigSaved={loadChildNames}
+            onConfigSaved={() => {
+              loadChildNames()
+              loadConfig()
+            }}
           />
         </div>
 

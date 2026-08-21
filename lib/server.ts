@@ -21,6 +21,8 @@ import {
   type AppConfig,
   type OneDriveUploadResult,
   type OneDriveUploadSession,
+  type WorkbookColumn,
+  type WorkbookColumnKind,
   DEFAULT_APP_CONFIG,
   bufferTimeSeconds,
   linkExpirySeconds,
@@ -63,6 +65,7 @@ type AppConfigOverrides = {
   childNameColumn?: string
   edcColumn?: string
   allowedAdminEmails?: string[]
+  uploadNotificationEmail?: string
   sharePointSiteId?: string
   sharePointSiteUrl?: string
   sharePointSiteName?: string
@@ -137,6 +140,7 @@ function normalizeOverrides(raw: unknown): AppConfigOverrides {
     childNameColumn: asNonEmptyString(raw.childNameColumn),
     edcColumn: asNonEmptyString(raw.edcColumn),
     allowedAdminEmails: asEmailList(raw.allowedAdminEmails),
+    uploadNotificationEmail: asOptionalString(raw.uploadNotificationEmail),
     sharePointSiteId: asOptionalString(raw.sharePointSiteId),
     sharePointSiteUrl: asOptionalString(raw.sharePointSiteUrl),
     sharePointSiteName: asOptionalString(raw.sharePointSiteName),
@@ -157,6 +161,10 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
     edcColumn: overrides.edcColumn ?? DEFAULT_APP_CONFIG.edcColumn,
     allowedAdminEmails:
       overrides.allowedAdminEmails ?? DEFAULT_APP_CONFIG.allowedAdminEmails,
+    uploadNotificationEmail: normalizeEmail(
+      overrides.uploadNotificationEmail ??
+        DEFAULT_APP_CONFIG.uploadNotificationEmail
+    ),
     sharePointSiteId:
       overrides.sharePointSiteId ?? DEFAULT_APP_CONFIG.sharePointSiteId,
     sharePointSiteUrl:
@@ -175,25 +183,44 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
   }
 }
 
+function notificationEmailOnAllowlist(
+  email: string | undefined,
+  allowed: string[]
+) {
+  const normalized = typeof email === "string" ? normalizeEmail(email) : ""
+  if (!normalized) return ""
+  return allowed.includes(normalized) ? normalized : ""
+}
+
 /** Effective config: Redis overrides merged over code defaults. */
 export async function getAppConfig(): Promise<AppConfig> {
   try {
     const raw = await getRedis().get<unknown>(CONFIG_KEY)
     const merged = mergeConfig(normalizeOverrides(raw))
+    const allowedAdminEmails = [
+      ...new Set([
+        ...merged.allowedAdminEmails.map(normalizeEmail),
+        ...envAllowedAdminEmails(),
+      ]),
+    ]
     return {
       ...merged,
-      allowedAdminEmails: [
-        ...new Set([
-          ...merged.allowedAdminEmails.map(normalizeEmail),
-          ...envAllowedAdminEmails(),
-        ]),
-      ],
+      allowedAdminEmails,
+      uploadNotificationEmail: notificationEmailOnAllowlist(
+        merged.uploadNotificationEmail,
+        allowedAdminEmails
+      ),
     }
   } catch {
+    const allowedAdminEmails = envAllowedAdminEmails()
     return {
       ...DEFAULT_APP_CONFIG,
       fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
-      allowedAdminEmails: envAllowedAdminEmails(),
+      allowedAdminEmails,
+      uploadNotificationEmail: notificationEmailOnAllowlist(
+        DEFAULT_APP_CONFIG.uploadNotificationEmail,
+        allowedAdminEmails
+      ),
     }
   }
 }
@@ -212,6 +239,10 @@ export async function updateAppConfig(
     edcColumn: patch.edcColumn ?? existing.edcColumn,
     allowedAdminEmails:
       patch.allowedAdminEmails ?? existing.allowedAdminEmails,
+    uploadNotificationEmail:
+      typeof patch.uploadNotificationEmail === "string"
+        ? normalizeEmail(patch.uploadNotificationEmail)
+        : existing.uploadNotificationEmail,
     sharePointSiteId: patch.sharePointSiteId ?? existing.sharePointSiteId,
     sharePointSiteUrl: patch.sharePointSiteUrl ?? existing.sharePointSiteUrl,
     sharePointSiteName:
@@ -222,8 +253,42 @@ export async function updateAppConfig(
     },
   }
 
+  const childNameColumn = next.childNameColumn?.trim()
+  const edcColumn = next.edcColumn?.trim()
+  if (
+    childNameColumn &&
+    edcColumn &&
+    childNameColumn.toLowerCase() === edcColumn.toLowerCase()
+  ) {
+    throw new Error("Child name column and EDC column cannot be the same.")
+  }
+
+  const allowedAdminEmails = [
+    ...new Set([
+      ...(
+        next.allowedAdminEmails ??
+        existing.allowedAdminEmails ??
+        DEFAULT_APP_CONFIG.allowedAdminEmails
+      ).map((email) => normalizeEmail(email)),
+      ...envAllowedAdminEmails(),
+    ]),
+  ]
+  const notify = next.uploadNotificationEmail
+    ? normalizeEmail(next.uploadNotificationEmail)
+    : ""
+  if (notify && !allowedAdminEmails.includes(notify)) {
+    if (typeof patch.uploadNotificationEmail === "string") {
+      throw new Error(
+        "Upload notification email must be one of the allowed admin emails."
+      )
+    }
+    next.uploadNotificationEmail = ""
+  } else {
+    next.uploadNotificationEmail = notify
+  }
+
   await redis.set(CONFIG_KEY, next)
-  return mergeConfig(next)
+  return getAppConfig()
 }
 
 export async function resetAppConfig(): Promise<AppConfig> {
@@ -2264,6 +2329,165 @@ async function findOneDriveWorkbookByName(
   return null
 }
 
+async function loadWorkbookSheet(
+  accessToken: string,
+  workbookName: string,
+  parseOptions: XLSX.ParsingOptions
+): Promise<{ workbookName: string; sheet: XLSX.WorkSheet }> {
+  const name = workbookName.trim()
+  if (!name) {
+    throw new Error("Reference workbook is not configured.")
+  }
+
+  const workbook = await findOneDriveWorkbookByName(accessToken, name)
+  if (!workbook) {
+    throw new Error(
+      `Reference workbook "${name}" was not found in the SharePoint site.`
+    )
+  }
+
+  const driveBase = workbook.driveId
+    ? driveBaseFromId(workbook.driveId)
+    : await getSiteDriveBaseUrl()
+  const contentRes = await fetch(`${driveBase}/items/${workbook.id}/content`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    redirect: "follow",
+  })
+  if (!contentRes.ok) {
+    const details = await contentRes.text()
+    throw new Error(
+      `Could not download "${name}" (${contentRes.status}): ${
+        details || contentRes.statusText
+      }`
+    )
+  }
+
+  const buffer = Buffer.from(await contentRes.arrayBuffer())
+  const parsed = XLSX.read(buffer, parseOptions)
+  const firstSheetName = parsed.SheetNames[0]
+  if (!firstSheetName || !parsed.Sheets[firstSheetName]) {
+    throw new Error(`No worksheets found in "${name}".`)
+  }
+
+  return { workbookName: name, sheet: parsed.Sheets[firstSheetName] }
+}
+
+const WORKBOOK_COLUMN_SAMPLE_ROWS = 50
+
+function isExcelDateFormat(fmt: string): boolean {
+  const isDate = XLSX.SSF?.is_date as ((value: string) => boolean) | undefined
+  if (typeof isDate !== "function") return false
+  try {
+    return Boolean(isDate(fmt))
+  } catch {
+    return false
+  }
+}
+
+function cellLooksLikeDate(cell: XLSX.CellObject): boolean {
+  if (cell.t === "d") return true
+  if (cell.v instanceof Date && !Number.isNaN(cell.v.getTime())) return true
+  if (cell.z == null) return false
+  const fmt = String(cell.z).trim()
+  return fmt.length > 0 && isExcelDateFormat(fmt)
+}
+
+function headerCellName(
+  sheet: XLSX.WorkSheet,
+  row: number,
+  col: number
+): string {
+  const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })] as
+    | XLSX.CellObject
+    | undefined
+  if (!cell) return ""
+  if (typeof cell.w === "string" && cell.w.trim()) return cell.w.trim()
+  return cellToDisplayString(cell.v)
+}
+
+function inferColumnKind(
+  sheet: XLSX.WorkSheet,
+  col: number,
+  headerRow: number,
+  lastRow: number
+): WorkbookColumnKind {
+  let text = 0
+  let date = 0
+  let number = 0
+  let booleanCount = 0
+  const end = Math.min(lastRow, headerRow + WORKBOOK_COLUMN_SAMPLE_ROWS)
+
+  for (let row = headerRow + 1; row <= end; row++) {
+    const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })] as
+      | XLSX.CellObject
+      | undefined
+    if (!cell || cell.t === "z" || cell.v == null || cell.v === "") continue
+
+    if (cellLooksLikeDate(cell)) {
+      date += 1
+      continue
+    }
+
+    const type = cell.t as string
+    if (type === "s" || type === "str") {
+      text += 1
+    } else if (type === "n") {
+      number += 1
+    } else if (type === "b") {
+      booleanCount += 1
+    }
+  }
+
+  const total = text + date + number + booleanCount
+  if (total === 0) return "unknown"
+  const max = Math.max(text, date, number, booleanCount)
+  if (date === max) return "date"
+  if (text === max) return "text"
+  if (number === max) return "number"
+  if (booleanCount === max) return "boolean"
+  return "unknown"
+}
+
+/**
+ * First-row headers from the given workbook, with value kinds inferred from
+ * cell types and Excel number formats (dates vs text vs numbers).
+ */
+export async function listReferenceWorkbookColumns(
+  accessToken: string,
+  workbookName: string
+): Promise<{ workbookName: string; columns: WorkbookColumn[] }> {
+  const { workbookName: name, sheet } = await loadWorkbookSheet(
+    accessToken,
+    workbookName,
+    { type: "buffer", cellDates: true, cellNF: true }
+  )
+
+  const ref = sheet["!ref"]
+  if (!ref) {
+    return { workbookName: name, columns: [] }
+  }
+
+  const range = XLSX.utils.decode_range(ref)
+  const seen = new Set<string>()
+  const columns: WorkbookColumn[] = []
+
+  for (let col = range.s.c; col <= range.e.c; col++) {
+    const header = headerCellName(sheet, range.s.r, col)
+    if (!header) continue
+    const key = header.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    columns.push({
+      name: header,
+      letter: XLSX.utils.encode_col(col),
+      kind: inferColumnKind(sheet, col, range.s.r, range.e.r),
+    })
+  }
+
+  return { workbookName: name, columns }
+}
+
 function columnLetterToIndex(letter: string): number | null {
   // Excel columns are A..XFD (at most 3 letters). Longer strings like "Name"
   // must be treated as header labels, not column letters.
@@ -2373,41 +2597,10 @@ export async function listChildNamesFromReferenceWorkbook(
     throw new Error("EDC column is not configured.")
   }
 
-  const workbook = await findOneDriveWorkbookByName(accessToken, workbookName)
-  if (!workbook) {
-    throw new Error(
-      `Reference workbook "${workbookName}" was not found in the SharePoint site.`
-    )
-  }
-
-  const driveBase = workbook.driveId
-    ? driveBaseFromId(workbook.driveId)
-    : await getSiteDriveBaseUrl()
-  const contentRes = await fetch(
-    `${driveBase}/items/${workbook.id}/content`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-      redirect: "follow",
-    }
-  )
-  if (!contentRes.ok) {
-    const details = await contentRes.text()
-    throw new Error(
-      `Could not download "${workbookName}" (${contentRes.status}): ${
-        details || contentRes.statusText
-      }`
-    )
-  }
-
-  const buffer = Buffer.from(await contentRes.arrayBuffer())
-  const parsed = XLSX.read(buffer, { type: "buffer", cellDates: true })
-  const firstSheetName = parsed.SheetNames[0]
-  if (!firstSheetName) {
-    throw new Error(`No worksheets found in "${workbookName}".`)
-  }
-
-  const sheet = parsed.Sheets[firstSheetName]
+  const { sheet } = await loadWorkbookSheet(accessToken, workbookName, {
+    type: "buffer",
+    cellDates: true,
+  })
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: "",

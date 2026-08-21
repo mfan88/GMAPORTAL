@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, Minus, Plus, X } from "lucide-react"
-import type { AppConfig } from "@/lib/appConfig"
+import type { AppConfig, WorkbookColumn, WorkbookColumnKind } from "@/lib/appConfig"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -94,6 +94,45 @@ function normalizeEmail(value: string) {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+const NAME_COLUMN_KINDS: WorkbookColumnKind[] = ["text", "unknown"]
+const EDC_COLUMN_KINDS: WorkbookColumnKind[] = ["date", "unknown"]
+
+function columnsToSelectItems(
+  columns: WorkbookColumn[],
+  kinds: WorkbookColumnKind[],
+  current: string
+) {
+  const allowed = new Set(kinds)
+  const items = columns
+    .filter((column) => allowed.has(column.kind))
+    .map((column) => ({
+      label: column.name,
+      value: column.name,
+    }))
+
+  if (current && !items.some((item) => item.value === current)) {
+    return [{ label: current, value: current }, ...items]
+  }
+  return items
+}
+
+function resolveColumnSelection(columns: WorkbookColumn[], spec: string) {
+  const trimmed = spec.trim()
+  if (!trimmed) return ""
+
+  const byName = columns.find(
+    (column) => column.name.toLowerCase() === trimmed.toLowerCase()
+  )
+  if (byName) return byName.name
+
+  const byLetter = columns.find(
+    (column) => column.letter.toUpperCase() === trimmed.toUpperCase()
+  )
+  if (byLetter) return byLetter.name
+
+  return ""
 }
 
 function configToForm(config: AppConfig): SettingsForm {
@@ -222,6 +261,10 @@ export default function SettingsCard({
   const [saving, setSaving] = useState(false)
   const [folders, setFolders] = useState<DriveOption[]>([])
   const [workbooks, setWorkbooks] = useState<DriveOption[]>([])
+  const [columns, setColumns] = useState<WorkbookColumn[]>([])
+  const [columnsLoading, setColumnsLoading] = useState(false)
+  const [columnsError, setColumnsError] = useState<string | null>(null)
+  const columnsWorkbookRef = useRef<string | null>(null)
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saved, setSaved] = useState<SettingsForm | null>(null)
   const [addingEmail, setAddingEmail] = useState(false)
@@ -294,6 +337,83 @@ export default function SettingsCard({
     }
   }, [load])
 
+  const workbookName = form?.referenceSheetName.trim() ?? ""
+
+  useEffect(() => {
+    if (!connected || !workbookName) {
+      columnsWorkbookRef.current = null
+      setColumns([])
+      setColumnsError(null)
+      setColumnsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const staleColumns = columnsWorkbookRef.current !== workbookName
+    if (staleColumns) {
+      setColumns([])
+    }
+    setColumnsLoading(true)
+    setColumnsError(null)
+
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/onedrive/workbook-columns?name=${encodeURIComponent(workbookName)}`,
+          { signal: controller.signal }
+        )
+        const data = (await res.json()) as {
+          columns?: WorkbookColumn[]
+          error?: string
+        }
+        if (!res.ok) {
+          throw new Error(data.error ?? "Could not load workbook columns")
+        }
+        const nextColumns = data.columns ?? []
+        const workbookChanged =
+          columnsWorkbookRef.current != null &&
+          columnsWorkbookRef.current !== workbookName
+        columnsWorkbookRef.current = workbookName
+        setColumns(nextColumns)
+        setForm((prev) => {
+          if (!prev) return prev
+          if (prev.referenceSheetName.trim() !== workbookName) return prev
+          const resolvedName = resolveColumnSelection(
+            nextColumns,
+            prev.childNameColumn
+          )
+          const resolvedEdc = resolveColumnSelection(
+            nextColumns,
+            prev.edcColumn
+          )
+          const childNameColumn =
+            resolvedName || (workbookChanged ? "" : prev.childNameColumn)
+          const edcColumn =
+            resolvedEdc || (workbookChanged ? "" : prev.edcColumn)
+          if (
+            childNameColumn === prev.childNameColumn &&
+            edcColumn === prev.edcColumn
+          ) {
+            return prev
+          }
+          return { ...prev, childNameColumn, edcColumn }
+        })
+      } catch (error) {
+        if (controller.signal.aborted || isBenignFetchInterruption(error)) return
+        setColumns([])
+        setColumnsError(
+          error instanceof Error
+            ? error.message
+            : "Could not load workbook columns"
+        )
+      } finally {
+        if (!controller.signal.aborted) setColumnsLoading(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [connected, workbookName])
+
   const folderItems = useMemo(() => {
     const names = new Set(folders.map((folder) => folder.name))
     const extras =
@@ -318,6 +438,28 @@ export default function SettingsCard({
       value: file.name,
     }))
   }, [workbooks, form])
+
+  const nameColumnItems = useMemo(
+    () =>
+      columnsToSelectItems(
+        columns,
+        NAME_COLUMN_KINDS,
+        form?.childNameColumn ?? ""
+      ),
+    [columns, form?.childNameColumn]
+  )
+
+  const edcColumnItems = useMemo(
+    () =>
+      columnsToSelectItems(columns, EDC_COLUMN_KINDS, form?.edcColumn ?? ""),
+    [columns, form?.edcColumn]
+  )
+
+  const sameColumnsSelected = Boolean(
+    form?.childNameColumn.trim() &&
+      form.childNameColumn.trim().toLowerCase() ===
+        form.edcColumn.trim().toLowerCase()
+  )
 
   const resetEmailEditor = () => {
     setAddingEmail(false)
@@ -390,6 +532,16 @@ export default function SettingsCard({
     }
     if (!form.edcColumn.trim()) {
       onBanner({ type: "error", message: "EDC column is required." })
+      return
+    }
+    if (
+      form.childNameColumn.trim().toLowerCase() ===
+      form.edcColumn.trim().toLowerCase()
+    ) {
+      onBanner({
+        type: "error",
+        message: "Child name column and EDC column cannot be the same.",
+      })
       return
     }
     if (parseDurationInput(form.bufferValue) === null) {
@@ -530,9 +682,15 @@ export default function SettingsCard({
               value={form.referenceSheetName}
               onValueChange={(value) => {
                 if (typeof value !== "string") return
-                setForm((prev) =>
-                  prev ? { ...prev, referenceSheetName: value } : prev
-                )
+                setForm((prev) => {
+                  if (!prev || value === prev.referenceSheetName) return prev
+                  return {
+                    ...prev,
+                    referenceSheetName: value,
+                    childNameColumn: "",
+                    edcColumn: "",
+                  }
+                })
               }}
               disabled={!editing}
             >
@@ -557,38 +715,87 @@ export default function SettingsCard({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="settings-child-column">Child name column</Label>
-              <Input
-                id="settings-child-column"
-                disabled={!editing}
-                placeholder="e.g. Child Name or A"
-                value={form.childNameColumn}
-                onChange={(event) => {
-                  const value = event.target.value
+              <Select
+                items={nameColumnItems}
+                value={form.childNameColumn || null}
+                onValueChange={(value) => {
+                  if (typeof value !== "string") return
                   setForm((prev) =>
                     prev ? { ...prev, childNameColumn: value } : prev
                   )
                 }}
-              />
+                disabled={
+                  !editing || columnsLoading || !form.referenceSheetName.trim()
+                }
+              >
+                <SelectTrigger id="settings-child-column" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      columnsLoading
+                        ? "Loading columns…"
+                        : "Select a text column"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {nameColumnItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="settings-edc-column">EDC column</Label>
-              <Input
-                id="settings-edc-column"
-                disabled={!editing}
-                placeholder="e.g. EDC or B"
-                value={form.edcColumn}
-                onChange={(event) => {
-                  const value = event.target.value
+              <Select
+                items={edcColumnItems}
+                value={form.edcColumn || null}
+                onValueChange={(value) => {
+                  if (typeof value !== "string") return
                   setForm((prev) =>
                     prev ? { ...prev, edcColumn: value } : prev
                   )
                 }}
-              />
+                disabled={
+                  !editing || columnsLoading || !form.referenceSheetName.trim()
+                }
+              >
+                <SelectTrigger id="settings-edc-column" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      columnsLoading
+                        ? "Loading columns…"
+                        : "Select a date column"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {edcColumnItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-          <p className="-mt-2 text-xs text-black/45">
-            Column header text (or letter) used to find the child’s name and EDC
-            date in the workbook.
+          <p
+            className={
+              columnsError || sameColumnsSelected
+                ? "-mt-2 text-xs text-red-600"
+                : "-mt-2 text-xs text-black/45"
+            }
+          >
+            {columnsError
+              ? columnsError
+              : sameColumnsSelected
+                ? "Child name column and EDC column cannot be the same."
+                : "Choose a text column for the child’s name and a date-formatted column for EDC. They cannot be the same."}
           </p>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

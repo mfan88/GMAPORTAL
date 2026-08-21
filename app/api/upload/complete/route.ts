@@ -21,8 +21,8 @@ type CompleteBody = {
 /**
  * Called by the client after an upload completes successfully. This consumes the
  * parent's single-use link and revokes their session cookie, so each link is
- * good for exactly one successful upload. Also emails allowlisted admins with
- * the child name + file link.
+ * good for exactly one successful upload. Also emails the configured
+ * allowlisted admin with the child name + file link.
  */
 export async function POST(request: NextRequest) {
   const shaped = toRequestShape(request)
@@ -54,9 +54,8 @@ export async function POST(request: NextRequest) {
       ])
 
       const childName = link?.childName?.trim() ?? ""
-      const recipients = [...config.allowedAdminEmails].filter(
-        (address): address is string => Boolean(address?.trim())
-      )
+      const recipient = config.uploadNotificationEmail.trim()
+      const recipients = recipient ? [recipient] : []
 
       if (childName) {
         const result = await sendUploadNotificationEmail({

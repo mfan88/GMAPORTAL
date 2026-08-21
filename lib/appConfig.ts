@@ -25,6 +25,11 @@ export type AppConfig = {
    * Compared case-insensitively. Can also be seeded via ALLOWED_ADMIN_EMAILS.
    */
   allowedAdminEmails: string[]
+  /**
+   * Allowlisted admin email that receives a notice after a successful parent
+   * upload. Empty until one is chosen on the setup page.
+   */
+  uploadNotificationEmail: string
   /** Graph site ID of the connected SharePoint site (e.g. "contoso.sharepoint.com,guid,guid"). */
   sharePointSiteId: string
   /** SharePoint site URL as entered/resolved at connect time (for display). */
@@ -50,6 +55,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   childNameColumn: "Child Name",
   edcColumn: "EDC",
   allowedAdminEmails: ["marcusfan06@outlook.com"],
+  uploadNotificationEmail: "",
   sharePointSiteId: "",
   sharePointSiteUrl: "",
   sharePointSiteName: "",
@@ -89,4 +95,20 @@ export type OneDriveUploadSession = {
   uploadUrl: string
   expirationDateTime: string
   uploadChunkSizeBytes?: number
+}
+
+/** Inferred Excel column kind from cell types and number formats. */
+export type WorkbookColumnKind =
+  | "text"
+  | "date"
+  | "number"
+  | "boolean"
+  | "unknown"
+
+export type WorkbookColumn = {
+  /** First-row header text. */
+  name: string
+  /** Excel column letter (A, B, …). */
+  letter: string
+  kind: WorkbookColumnKind
 }
