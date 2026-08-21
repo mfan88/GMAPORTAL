@@ -2117,16 +2117,32 @@ async function listDriveChildrenPage(
   return fetchGraphJson<GraphChildrenPage>(url, accessToken)
 }
 
+async function getDriveItemByPath(
+  driveId: string,
+  itemPath: string,
+  accessToken: string
+): Promise<GraphDriveItem | null> {
+  const encoded = encodeDrivePath(itemPath)
+  const res = await fetch(
+    `${driveBaseFromId(driveId)}/root:/${encoded}?$select=id,name,file`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    }
+  )
+  if (res.status === 404) return null
+  if (!res.ok) await parseGraphError(res)
+  return (await res.json()) as GraphDriveItem
+}
+
 /**
- * All .xlsx workbooks under the connected SharePoint site drive, found by
- * walking folders. Prefer this over Graph search — search is index-based and
- * often misses newly uploaded files for minutes (or longer).
+ * .xlsx files at each library root and one folder down. Do not walk video
+ * libraries deeply — that made child-name loading extremely slow.
  */
 export async function listOneDriveWorkbooks(
   accessToken: string
 ): Promise<DriveWorkbookOption[]> {
   const MAX_WORKBOOKS = 200
-  const MAX_FOLDERS = 300
   const drives = await listSiteDrives(accessToken)
 
   const seenNames = new Set<string>()
@@ -2136,59 +2152,56 @@ export async function listOneDriveWorkbooks(
     if (!drive.id || workbooks.length >= MAX_WORKBOOKS) break
 
     const driveBase = driveBaseFromId(drive.id)
-    const folderQueue: string[] = ["root"]
+    const folderQueue: Array<{ id: string; depth: number }> = [
+      { id: "root", depth: 0 },
+    ]
     const visitedFolders = new Set<string>()
 
     try {
-    while (folderQueue.length > 0 && workbooks.length < MAX_WORKBOOKS) {
-      if (visitedFolders.size >= MAX_FOLDERS) break
+      while (folderQueue.length > 0 && workbooks.length < MAX_WORKBOOKS) {
+        const current = folderQueue.shift()
+        if (!current || visitedFolders.has(current.id)) continue
+        visitedFolders.add(current.id)
 
-      const folderId = folderQueue.shift()
-      if (!folderId || visitedFolders.has(folderId)) continue
-      visitedFolders.add(folderId)
+        const childrenPath =
+          current.id === "root"
+            ? `${driveBase}/root/children`
+            : `${driveBase}/items/${current.id}/children`
 
-      const childrenPath =
-        folderId === "root"
-          ? `${driveBase}/root/children`
-          : `${driveBase}/items/${folderId}/children`
+        let nextUrl: string | undefined =
+          `${childrenPath}?$select=id,name,file,folder&$top=200`
 
-      let nextUrl: string | undefined =
-        `${childrenPath}?$select=id,name,file,folder&$top=200`
+        while (nextUrl && workbooks.length < MAX_WORKBOOKS) {
+          const page = await listDriveChildrenPage(nextUrl, accessToken)
 
-      while (nextUrl && workbooks.length < MAX_WORKBOOKS) {
-        const page = await listDriveChildrenPage(nextUrl, accessToken)
-
-        for (const item of page.value ?? []) {
-          if (typeof item.id !== "string" || typeof item.name !== "string") {
-            continue
-          }
-
-          if (item.folder) {
-            if (
-              !visitedFolders.has(item.id) &&
-              visitedFolders.size + folderQueue.length < MAX_FOLDERS
-            ) {
-              folderQueue.push(item.id)
+          for (const item of page.value ?? []) {
+            if (typeof item.id !== "string" || typeof item.name !== "string") {
+              continue
             }
-            continue
+
+            if (item.folder) {
+              if (current.depth === 0 && !visitedFolders.has(item.id)) {
+                folderQueue.push({ id: item.id, depth: 1 })
+              }
+              continue
+            }
+
+            if (!item.file) continue
+            if (!item.name.toLowerCase().endsWith(".xlsx")) continue
+            if (seenNames.has(item.name)) continue
+
+            seenNames.add(item.name)
+            workbooks.push({
+              id: item.id,
+              name: item.name,
+              driveId: drive.id,
+            })
+            if (workbooks.length >= MAX_WORKBOOKS) break
           }
 
-          if (!item.file) continue
-          if (!item.name.toLowerCase().endsWith(".xlsx")) continue
-          if (seenNames.has(item.name)) continue
-
-          seenNames.add(item.name)
-          workbooks.push({
-            id: item.id,
-            name: item.name,
-            driveId: drive.id,
-          })
-          if (workbooks.length >= MAX_WORKBOOKS) break
+          nextUrl = page["@odata.nextLink"]
         }
-
-        nextUrl = page["@odata.nextLink"]
       }
-    }
     } catch {
       continue
     }
@@ -2201,14 +2214,54 @@ async function findOneDriveWorkbookByName(
   accessToken: string,
   filename: string
 ): Promise<DriveWorkbookOption | null> {
-  const target = filename.trim().toLowerCase()
-  if (!target) return null
+  const name = filename.trim()
+  if (!name) return null
 
-  const workbooks = await listOneDriveWorkbooks(accessToken)
-  return (
-    workbooks.find((workbook) => workbook.name.toLowerCase() === target) ??
-    null
-  )
+  const { folderName } = await getAppConfig()
+  const drives = await listSiteDrives(accessToken)
+  const folder = folderName.trim()
+
+  const preferred = (drive: GraphDrive) => {
+    if (drive.name === folder) return 0
+    if (folder.includes("/") && drive.name === folder.split("/")[0]) return 0
+    if (drive.name === "Documents") return 1
+    return 2
+  }
+  const ordered = [...drives].sort((a, b) => preferred(a) - preferred(b))
+
+  const pathsForDrive = (drive: GraphDrive): string[] => {
+    const paths = [name]
+    if (!folder) return paths
+    if (drive.name === folder) return paths
+    const slash = folder.indexOf("/")
+    if (slash > 0 && drive.name === folder.slice(0, slash)) {
+      paths.push(`${folder.slice(slash + 1)}/${name}`)
+    } else if (!folder.includes("/")) {
+      paths.push(`${folder}/${name}`)
+    }
+    return paths
+  }
+
+  for (const drive of ordered) {
+    if (!drive.id) continue
+    for (const path of pathsForDrive(drive)) {
+      try {
+        const item = await getDriveItemByPath(drive.id, path, accessToken)
+        if (
+          item?.id &&
+          item.file &&
+          typeof item.name === "string" &&
+          item.name.toLowerCase().endsWith(".xlsx")
+        ) {
+          return { id: item.id, name: item.name, driveId: drive.id }
+        }
+      } catch {
+        continue
+      }
+    }
+  }
+
+  return null
 }
 
 function columnLetterToIndex(letter: string): number | null {
