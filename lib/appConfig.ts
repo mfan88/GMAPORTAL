@@ -2,7 +2,7 @@
  * App/Upload Settings
  */
 export type AppConfig = {
-  folderName: string // Document library or folder that receives uploads
+  folderName: string // Library or library/subfolder path that receives uploads
   bufferTimeMs: number // How long after creation before a link becomes usable (ms)
   linkExpiryTimeMs: number
   fileDetails: {

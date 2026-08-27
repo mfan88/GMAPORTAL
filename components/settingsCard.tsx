@@ -6,6 +6,7 @@ import type { AppConfig, WorkbookColumn, WorkbookColumnKind } from "@/lib/appCon
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Combobox } from "@/components/ui/combobox"
 import {
   Select,
   SelectContent,
@@ -705,33 +706,23 @@ export default function SettingsCard({
         <div className="mt-4 flex flex-1 flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-folder">Upload folder</Label>
-            <Select
+            <Combobox
+              id="settings-folder"
               items={folderItems}
               value={form.folderName}
               onValueChange={(value) => {
-                if (typeof value !== "string") return
+                if (!value) return
                 setForm((prev) =>
                   prev ? { ...prev, folderName: value } : prev
                 )
               }}
+              placeholder="Search libraries and folders"
+              emptyText="No matching folders."
               disabled={!editing}
-            >
-              <SelectTrigger id="settings-folder" className="w-full">
-                <SelectValue placeholder="Select a folder" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {folderItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            />
             <p className="text-xs text-black/45">
-              Document libraries and root folders on the connected SharePoint
-              site.
+              Libraries and nested folders, shown as a path (for example{" "}
+              GMA Video/Inbox). Uploads go to that folder, not the site root.
             </p>
           </div>
 

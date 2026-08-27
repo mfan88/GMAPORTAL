@@ -1278,17 +1278,40 @@ async function listSiteDrives(accessToken: string): Promise<GraphDrive[]> {
   return drives.filter((drive) => Boolean(drive.id && drive.name))
 }
 
+function normalizeFolderPath(folderName: string) {
+  return folderName.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "")
+}
+
+async function findDriveFolderPath(
+  drives: GraphDrive[],
+  folderPath: string,
+  accessToken: string
+): Promise<{ driveId: string } | null> {
+  for (const drive of drives) {
+    if (!drive.id) continue
+    try {
+      const item = await getDriveItemByPath(drive.id, folderPath, accessToken)
+      if (item?.id && item.folder) {
+        return { driveId: drive.id }
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
 /**
  * Resolve where uploads go. `folderName` may be a document library (drive)
  * name, a library-relative path like "GMA Video/Inbox", or a folder under
- * the site's default Documents library.
+ * any library on the site.
  */
 async function resolveUploadLocation(filename: string): Promise<{
   driveBase: string
   itemPath: string
 }> {
   const { folderName } = await getAppConfig()
-  const folder = folderName.trim()
+  const folder = normalizeFolderPath(folderName)
   const defaultDrive = await getSiteDriveBaseUrl()
 
   if (!folder) {
@@ -1313,6 +1336,14 @@ async function resolveUploadLocation(filename: string): Promise<{
   const library = drives.find((drive) => drive.name === folder)
   if (library?.id) {
     return { driveBase: driveBaseFromId(library.id), itemPath: filename }
+  }
+
+  const located = await findDriveFolderPath(drives, folder, accessToken)
+  if (located) {
+    return {
+      driveBase: driveBaseFromId(located.driveId),
+      itemPath: `${folder}/${filename}`,
+    }
   }
 
   return { driveBase: defaultDrive, itemPath: `${folder}/${filename}` }
@@ -2142,33 +2173,68 @@ async function fetchGraphJson<T>(url: string, accessToken: string): Promise<T> {
   return (await res.json()) as T
 }
 
-async function listDriveRootFolders(
+const MAX_UPLOAD_FOLDER_OPTIONS = 250
+const MAX_UPLOAD_FOLDER_DEPTH = 3
+
+async function listDriveFolderTree(
   driveId: string,
-  accessToken: string
+  driveName: string,
+  accessToken: string,
+  remaining: number
 ): Promise<DriveFolderOption[]> {
   const folders: DriveFolderOption[] = []
-  let nextUrl: string | undefined =
-    `${driveBaseFromId(driveId)}/root/children?$select=id,name,folder&$top=200`
+  const queue: Array<{ id: string; path: string; depth: number }> = [
+    { id: "root", path: driveName, depth: 0 },
+  ]
 
-  while (nextUrl) {
-    const page: {
-      value?: GraphDriveItem[]
-      "@odata.nextLink"?: string
-    } = await fetchGraphJson(nextUrl, accessToken)
-    for (const item of page.value ?? []) {
-      if (item.folder && typeof item.name === "string" && item.id) {
-        folders.push({ id: item.id, name: item.name })
+  while (queue.length > 0 && folders.length < remaining) {
+    const current = queue.shift()
+    if (!current || current.depth >= MAX_UPLOAD_FOLDER_DEPTH) continue
+
+    const childrenPath =
+      current.id === "root"
+        ? `${driveBaseFromId(driveId)}/root/children`
+        : `${driveBaseFromId(driveId)}/items/${current.id}/children`
+
+    let nextUrl: string | undefined =
+      `${childrenPath}?$select=id,name,folder&$top=200`
+
+    try {
+      while (nextUrl && folders.length < remaining) {
+        const page: {
+          value?: GraphDriveItem[]
+          "@odata.nextLink"?: string
+        } = await fetchGraphJson(nextUrl, accessToken)
+
+        for (const item of page.value ?? []) {
+          if (!item.folder || typeof item.name !== "string" || !item.id) {
+            continue
+          }
+          const path = `${current.path}/${item.name}`
+          folders.push({ id: item.id, name: path })
+          if (
+            current.depth + 1 < MAX_UPLOAD_FOLDER_DEPTH &&
+            folders.length + queue.length < remaining
+          ) {
+            queue.push({ id: item.id, path, depth: current.depth + 1 })
+          }
+          if (folders.length >= remaining) break
+        }
+
+        nextUrl = page["@odata.nextLink"]
       }
+    } catch {
+      continue
     }
-    nextUrl = page["@odata.nextLink"]
   }
 
   return folders
 }
 
 /**
- * Document libraries on the site, plus root folders inside each library.
- * SharePoint libraries are drives, not children of the default Documents library.
+ * Document libraries on the site, plus nested folders as library-relative
+ * paths (e.g. "GMA Video/Inbox"). SharePoint libraries are drives, not
+ * children of the default Documents library.
  */
 export async function listOneDriveRootFolders(
   accessToken: string
@@ -2185,23 +2251,18 @@ export async function listOneDriveRootFolders(
 
   for (const drive of drives) {
     if (!drive.id || !drive.name) continue
-    let nested: DriveFolderOption[] = []
-    try {
-      nested = await listDriveRootFolders(drive.id, accessToken)
-    } catch {
-      continue
-    }
+    const remaining = MAX_UPLOAD_FOLDER_OPTIONS - options.length
+    if (remaining <= 0) break
+    const nested = await listDriveFolderTree(
+      drive.id,
+      drive.name,
+      accessToken,
+      remaining
+    )
     for (const folder of nested) {
-      if (!seen.has(folder.name)) {
-        seen.add(folder.name)
-        options.push(folder)
-        continue
-      }
-      const qualified = `${drive.name}/${folder.name}`
-      if (!seen.has(qualified)) {
-        seen.add(qualified)
-        options.push({ id: folder.id, name: qualified })
-      }
+      if (seen.has(folder.name)) continue
+      seen.add(folder.name)
+      options.push(folder)
     }
   }
 
@@ -2227,7 +2288,7 @@ async function getDriveItemByPath(
 ): Promise<GraphDriveItem | null> {
   const encoded = encodeDrivePath(itemPath)
   const res = await fetch(
-    `${driveBaseFromId(driveId)}/root:/${encoded}?$select=id,name,file`,
+    `${driveBaseFromId(driveId)}/root:/${encoded}?$select=id,name,file,folder`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
