@@ -16,6 +16,8 @@ export type AppConfig = {
   }
   /** Excel workbook filename under the SharePoint site drive (e.g. REFERENCE.xlsx). */
   referenceSheetName: string
+  /** Worksheet/tab name inside the reference workbook. Empty uses the first sheet. */
+  referenceWorksheetName: string
   /** Column header (or letter) with the child's name. */
   childNameColumn: string
   /** Column header (or letter) with the EDC date. */
@@ -52,6 +54,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     "video/*": [],
   },
   referenceSheetName: "REFERENCE.xlsx",
+  referenceWorksheetName: "",
   childNameColumn: "Child Name",
   edcColumn: "EDC",
   allowedAdminEmails: ["marcusfan06@outlook.com"],

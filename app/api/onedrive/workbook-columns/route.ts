@@ -12,24 +12,32 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Admin access required" }, { status: 401 })
   }
 
-  const workbookName =
-    new URL(request.url).searchParams.get("name")?.trim() ?? ""
+  const searchParams = new URL(request.url).searchParams
+  const workbookName = searchParams.get("name")?.trim() ?? ""
+  const worksheetName = searchParams.get("sheet")?.trim() ?? ""
   if (!workbookName) {
     return NextResponse.json(
-      { error: "Workbook name is required", columns: [] },
+      { error: "Workbook name is required", columns: [], sheets: [] },
       { status: 400 }
     )
   }
 
   try {
     const accessToken = await getOneDriveAccessToken()
-    const result = await listReferenceWorkbookColumns(accessToken, workbookName)
+    const result = await listReferenceWorkbookColumns(
+      accessToken,
+      workbookName,
+      worksheetName || undefined
+    )
     return NextResponse.json(result)
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Could not load columns from the reference workbook"
-    return NextResponse.json({ error: message, columns: [] }, { status: 500 })
+    return NextResponse.json(
+      { error: message, columns: [], sheets: [] },
+      { status: 500 }
+    )
   }
 }

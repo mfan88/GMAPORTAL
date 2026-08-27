@@ -92,6 +92,7 @@ export default function ConsolePage() {
   const [childNamesLoading, setChildNamesLoading] = useState(false)
   const [childNamesError, setChildNamesError] = useState<string | null>(null)
   const [selectedChild, setSelectedChild] = useState<string | null>(null)
+  const [childQuery, setChildQuery] = useState("")
   const [selectedEdc, setSelectedEdc] = useState<string | null>(null)
   const [isSchedulingLetter, setIsSchedulingLetter] = useState(false)
   const [letterScheduleDate, setLetterScheduleDate] = useState<
@@ -408,10 +409,36 @@ export default function ConsolePage() {
     edcStatement = `No EDC on file for ${selectedChild}. Enter one below to generate a link.`
   }
 
-  const childItems = children.map((child) => ({
-    label: child.name,
-    value: child.name,
-  }))
+  const childItems = useMemo(
+    () =>
+      children.map((child) => ({
+        label: child.name,
+        value: child.name,
+      })),
+    [children]
+  )
+
+  const filteredChildItems = useMemo(() => {
+    const query = childQuery.trim().toLowerCase()
+    const items = query
+      ? childItems.filter((item) => item.label.toLowerCase().includes(query))
+      : childItems
+    if (
+      selectedChild &&
+      !items.some((item) => item.value === selectedChild)
+    ) {
+      const selected = childItems.find((item) => item.value === selectedChild)
+      if (selected) return [selected, ...items]
+    }
+    return items
+  }, [childItems, childQuery, selectedChild])
+
+  const applyChildSelection = (value: string) => {
+    const nextEdc =
+      children.find((child) => child.name === value)?.edc ?? null
+    setSelectedChild(value)
+    setSelectedEdc(nextEdc)
+  }
 
   const generateLink = useCallback(() => {
     if (!selectedChild || !selectedEdc) {
@@ -502,29 +529,64 @@ export default function ConsolePage() {
     }
     return (
       <>
-        <Select
-          items={childItems}
-          value={selectedChild ?? undefined}
-          onValueChange={(value) => {
-            const nextEdc =
-              children.find((child) => child.name === value)?.edc ?? null
-            setSelectedChild(value)
-            setSelectedEdc(nextEdc)
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select a Child" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {childItems.map((child) => (
-                <SelectItem key={child.value} value={child.value}>
-                  {child.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="child-search">Search child name</Label>
+            <Input
+              id="child-search"
+              type="search"
+              autoComplete="off"
+              placeholder="Type a name"
+              value={childQuery}
+              onChange={(event) => setChildQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return
+                event.preventDefault()
+                const query = childQuery.trim().toLowerCase()
+                if (!query) return
+                const matches = childItems.filter((item) =>
+                  item.label.toLowerCase().includes(query)
+                )
+                const exact = matches.find(
+                  (item) => item.label.toLowerCase() === query
+                )
+                const pick =
+                  exact ?? (matches.length === 1 ? matches[0] : null)
+                if (pick) applyChildSelection(pick.value)
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="child-select">Select a child</Label>
+            <Select
+              items={filteredChildItems}
+              value={selectedChild ?? undefined}
+              onValueChange={(value) => {
+                if (typeof value !== "string") return
+                applyChildSelection(value)
+              }}
+            >
+              <SelectTrigger id="child-select" className="w-full">
+                <SelectValue placeholder="Select a Child" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {filteredChildItems.map((child) => (
+                    <SelectItem key={child.value} value={child.value}>
+                      {child.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        {childQuery.trim() &&
+        !childItems.some((item) =>
+          item.label.toLowerCase().includes(childQuery.trim().toLowerCase())
+        ) ? (
+          <p className="text-sm text-black/50">No matching names.</p>
+        ) : null}
         {edcStatement ? (
           <p className="text-sm text-black/80">{edcStatement}</p>
         ) : null}

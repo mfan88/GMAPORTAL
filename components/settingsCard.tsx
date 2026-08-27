@@ -36,6 +36,7 @@ const UNIT_MS: Record<DurationUnit, number> = {
 type SettingsForm = {
   folderName: string
   referenceSheetName: string
+  referenceWorksheetName: string
   childNameColumn: string
   edcColumn: string
   /** Digits-only text; empty string means unset / invalid for save. */
@@ -97,7 +98,7 @@ function isValidEmail(value: string) {
 }
 
 const NAME_COLUMN_KINDS: WorkbookColumnKind[] = ["text", "unknown"]
-const EDC_COLUMN_KINDS: WorkbookColumnKind[] = ["date", "unknown"]
+const EDC_COLUMN_KINDS: WorkbookColumnKind[] = ["date", "text", "unknown"]
 
 function columnsToSelectItems(
   columns: WorkbookColumn[],
@@ -141,6 +142,7 @@ function configToForm(config: AppConfig): SettingsForm {
   return {
     folderName: config.folderName,
     referenceSheetName: config.referenceSheetName,
+    referenceWorksheetName: config.referenceWorksheetName,
     childNameColumn: config.childNameColumn,
     edcColumn: config.edcColumn,
     bufferValue: buffer.value,
@@ -161,6 +163,7 @@ function formToConfigPatch(form: SettingsForm) {
   return {
     folderName: form.folderName.trim(),
     referenceSheetName: form.referenceSheetName.trim(),
+    referenceWorksheetName: form.referenceWorksheetName.trim(),
     childNameColumn: form.childNameColumn.trim(),
     edcColumn: form.edcColumn.trim(),
     bufferTimeMs: durationToMs(form.bufferValue, form.bufferUnit),
@@ -262,9 +265,12 @@ export default function SettingsCard({
   const [folders, setFolders] = useState<DriveOption[]>([])
   const [workbooks, setWorkbooks] = useState<DriveOption[]>([])
   const [columns, setColumns] = useState<WorkbookColumn[]>([])
+  const [worksheets, setWorksheets] = useState<string[]>([])
   const [columnsLoading, setColumnsLoading] = useState(false)
   const [columnsError, setColumnsError] = useState<string | null>(null)
-  const columnsWorkbookRef = useRef<string | null>(null)
+  const columnsSourceRef = useRef<{ workbook: string; sheet: string } | null>(
+    null
+  )
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saved, setSaved] = useState<SettingsForm | null>(null)
   const [addingEmail, setAddingEmail] = useState(false)
@@ -338,18 +344,32 @@ export default function SettingsCard({
   }, [load])
 
   const workbookName = form?.referenceSheetName.trim() ?? ""
+  const worksheetName = form?.referenceWorksheetName.trim() ?? ""
 
   useEffect(() => {
     if (!connected || !workbookName) {
-      columnsWorkbookRef.current = null
+      columnsSourceRef.current = null
+      setWorksheets([])
       setColumns([])
       setColumnsError(null)
       setColumnsLoading(false)
       return
     }
 
+    const loaded = columnsSourceRef.current
+    if (
+      loaded &&
+      loaded.workbook === workbookName &&
+      (worksheetName === loaded.sheet || (!worksheetName && loaded.sheet))
+    ) {
+      setColumnsLoading(false)
+      return
+    }
+
     const controller = new AbortController()
-    const staleColumns = columnsWorkbookRef.current !== workbookName
+    const staleColumns =
+      loaded?.workbook !== workbookName ||
+      (Boolean(worksheetName) && loaded?.sheet !== worksheetName)
     if (staleColumns) {
       setColumns([])
     }
@@ -358,26 +378,42 @@ export default function SettingsCard({
 
     void (async () => {
       try {
-        const res = await fetch(
-          `/api/onedrive/workbook-columns?name=${encodeURIComponent(workbookName)}`,
-          { signal: controller.signal }
-        )
+        const params = new URLSearchParams({ name: workbookName })
+        if (worksheetName) params.set("sheet", worksheetName)
+        const res = await fetch(`/api/onedrive/workbook-columns?${params}`, {
+          signal: controller.signal,
+        })
         const data = (await res.json()) as {
           columns?: WorkbookColumn[]
+          sheets?: string[]
+          sheetName?: string
           error?: string
         }
         if (!res.ok) {
           throw new Error(data.error ?? "Could not load workbook columns")
         }
+        const nextSheets = data.sheets ?? []
+        const resolvedSheet = data.sheetName ?? nextSheets[0] ?? ""
         const nextColumns = data.columns ?? []
         const workbookChanged =
-          columnsWorkbookRef.current != null &&
-          columnsWorkbookRef.current !== workbookName
-        columnsWorkbookRef.current = workbookName
+          columnsSourceRef.current != null &&
+          columnsSourceRef.current.workbook !== workbookName
+        const sheetChanged =
+          columnsSourceRef.current != null &&
+          columnsSourceRef.current.workbook === workbookName &&
+          columnsSourceRef.current.sheet !== resolvedSheet
+        columnsSourceRef.current = {
+          workbook: workbookName,
+          sheet: resolvedSheet,
+        }
+        setWorksheets(nextSheets)
         setColumns(nextColumns)
         setForm((prev) => {
           if (!prev) return prev
           if (prev.referenceSheetName.trim() !== workbookName) return prev
+          const nextWorksheet = nextSheets.includes(prev.referenceWorksheetName)
+            ? prev.referenceWorksheetName
+            : resolvedSheet
           const resolvedName = resolveColumnSelection(
             nextColumns,
             prev.childNameColumn
@@ -386,17 +422,24 @@ export default function SettingsCard({
             nextColumns,
             prev.edcColumn
           )
+          const resetColumns = workbookChanged || sheetChanged
           const childNameColumn =
-            resolvedName || (workbookChanged ? "" : prev.childNameColumn)
+            resolvedName || (resetColumns ? "" : prev.childNameColumn)
           const edcColumn =
-            resolvedEdc || (workbookChanged ? "" : prev.edcColumn)
+            resolvedEdc || (resetColumns ? "" : prev.edcColumn)
           if (
+            nextWorksheet === prev.referenceWorksheetName &&
             childNameColumn === prev.childNameColumn &&
             edcColumn === prev.edcColumn
           ) {
             return prev
           }
-          return { ...prev, childNameColumn, edcColumn }
+          return {
+            ...prev,
+            referenceWorksheetName: nextWorksheet,
+            childNameColumn,
+            edcColumn,
+          }
         })
       } catch (error) {
         if (controller.signal.aborted || isBenignFetchInterruption(error)) return
@@ -412,7 +455,7 @@ export default function SettingsCard({
     })()
 
     return () => controller.abort()
-  }, [connected, workbookName])
+  }, [connected, workbookName, worksheetName])
 
   const folderItems = useMemo(() => {
     const names = new Set(folders.map((folder) => folder.name))
@@ -438,6 +481,19 @@ export default function SettingsCard({
       value: file.name,
     }))
   }, [workbooks, form])
+
+  const worksheetItems = useMemo(() => {
+    const names = new Set(worksheets)
+    const current = form?.referenceWorksheetName
+    const extras =
+      current && !names.has(current)
+        ? [current]
+        : []
+    return [...extras, ...worksheets].map((sheet) => ({
+      label: sheet,
+      value: sheet,
+    }))
+  }, [worksheets, form])
 
   const nameColumnItems = useMemo(
     () =>
@@ -524,6 +580,10 @@ export default function SettingsCard({
     }
     if (!form.referenceSheetName.trim()) {
       onBanner({ type: "error", message: "Reference workbook is required." })
+      return
+    }
+    if (!form.referenceWorksheetName.trim()) {
+      onBanner({ type: "error", message: "Workbook page is required." })
       return
     }
     if (!form.childNameColumn.trim()) {
@@ -687,6 +747,7 @@ export default function SettingsCard({
                   return {
                     ...prev,
                     referenceSheetName: value,
+                    referenceWorksheetName: "",
                     childNameColumn: "",
                     edcColumn: "",
                   }
@@ -712,6 +773,49 @@ export default function SettingsCard({
             </p>
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="settings-worksheet">Workbook page</Label>
+            <Select
+              items={worksheetItems}
+              value={form.referenceWorksheetName || null}
+              onValueChange={(value) => {
+                if (typeof value !== "string") return
+                setForm((prev) => {
+                  if (!prev || value === prev.referenceWorksheetName) return prev
+                  return {
+                    ...prev,
+                    referenceWorksheetName: value,
+                    childNameColumn: "",
+                    edcColumn: "",
+                  }
+                })
+              }}
+              disabled={!editing || !form.referenceSheetName.trim()}
+            >
+              <SelectTrigger id="settings-worksheet" className="w-full">
+                <SelectValue
+                  placeholder={
+                    columnsLoading && !form.referenceWorksheetName
+                      ? "Loading pages…"
+                      : "Select a page"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {worksheetItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-black/45">
+              Tab inside the selected workbook. Columns are read from this page.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="settings-child-column">Child name column</Label>
@@ -725,7 +829,10 @@ export default function SettingsCard({
                   )
                 }}
                 disabled={
-                  !editing || columnsLoading || !form.referenceSheetName.trim()
+                  !editing ||
+                  columnsLoading ||
+                  !form.referenceSheetName.trim() ||
+                  !form.referenceWorksheetName.trim()
                 }
               >
                 <SelectTrigger id="settings-child-column" className="w-full">
@@ -760,7 +867,10 @@ export default function SettingsCard({
                   )
                 }}
                 disabled={
-                  !editing || columnsLoading || !form.referenceSheetName.trim()
+                  !editing ||
+                  columnsLoading ||
+                  !form.referenceSheetName.trim() ||
+                  !form.referenceWorksheetName.trim()
                 }
               >
                 <SelectTrigger id="settings-edc-column" className="w-full">
@@ -768,7 +878,7 @@ export default function SettingsCard({
                     placeholder={
                       columnsLoading
                         ? "Loading columns…"
-                        : "Select a date column"
+                        : "Select a YYYY-MM-DD column"
                     }
                   />
                 </SelectTrigger>
@@ -795,7 +905,7 @@ export default function SettingsCard({
               ? columnsError
               : sameColumnsSelected
                 ? "Child name column and EDC column cannot be the same."
-                : "Choose a text column for the child’s name and a date-formatted column for EDC. They cannot be the same."}
+                : "Choose a text column for the child’s name and a YYYY-MM-DD date column for EDC. They cannot be the same."}
           </p>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

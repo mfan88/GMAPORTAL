@@ -62,6 +62,7 @@ type AppConfigOverrides = {
   linkExpiryTimeMs?: number
   fileDetails?: Partial<AppConfig["fileDetails"]>
   referenceSheetName?: string
+  referenceWorksheetName?: string
   childNameColumn?: string
   edcColumn?: string
   allowedAdminEmails?: string[]
@@ -137,6 +138,7 @@ function normalizeOverrides(raw: unknown): AppConfigOverrides {
     bufferTimeMs: asPositiveNumber(raw.bufferTimeMs),
     linkExpiryTimeMs: asPositiveNumber(raw.linkExpiryTimeMs),
     referenceSheetName: asNonEmptyString(raw.referenceSheetName),
+    referenceWorksheetName: asNonEmptyString(raw.referenceWorksheetName),
     childNameColumn: asNonEmptyString(raw.childNameColumn),
     edcColumn: asNonEmptyString(raw.edcColumn),
     allowedAdminEmails: asEmailList(raw.allowedAdminEmails),
@@ -156,6 +158,9 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
       overrides.linkExpiryTimeMs ?? DEFAULT_APP_CONFIG.linkExpiryTimeMs,
     referenceSheetName:
       overrides.referenceSheetName ?? DEFAULT_APP_CONFIG.referenceSheetName,
+    referenceWorksheetName:
+      overrides.referenceWorksheetName ??
+      DEFAULT_APP_CONFIG.referenceWorksheetName,
     childNameColumn:
       overrides.childNameColumn ?? DEFAULT_APP_CONFIG.childNameColumn,
     edcColumn: overrides.edcColumn ?? DEFAULT_APP_CONFIG.edcColumn,
@@ -235,6 +240,8 @@ export async function updateAppConfig(
     bufferTimeMs: patch.bufferTimeMs ?? existing.bufferTimeMs,
     linkExpiryTimeMs: patch.linkExpiryTimeMs ?? existing.linkExpiryTimeMs,
     referenceSheetName: patch.referenceSheetName ?? existing.referenceSheetName,
+    referenceWorksheetName:
+      patch.referenceWorksheetName ?? existing.referenceWorksheetName,
     childNameColumn: patch.childNameColumn ?? existing.childNameColumn,
     edcColumn: patch.edcColumn ?? existing.edcColumn,
     allowedAdminEmails:
@@ -2332,8 +2339,14 @@ async function findOneDriveWorkbookByName(
 async function loadWorkbookSheet(
   accessToken: string,
   workbookName: string,
-  parseOptions: XLSX.ParsingOptions
-): Promise<{ workbookName: string; sheet: XLSX.WorkSheet }> {
+  parseOptions: XLSX.ParsingOptions,
+  options: { worksheetName?: string; requireWorksheet?: boolean } = {}
+): Promise<{
+  workbookName: string
+  sheet: XLSX.WorkSheet
+  sheetName: string
+  sheetNames: string[]
+}> {
   const name = workbookName.trim()
   if (!name) {
     throw new Error("Reference workbook is not configured.")
@@ -2365,15 +2378,56 @@ async function loadWorkbookSheet(
 
   const buffer = Buffer.from(await contentRes.arrayBuffer())
   const parsed = XLSX.read(buffer, parseOptions)
-  const firstSheetName = parsed.SheetNames[0]
-  if (!firstSheetName || !parsed.Sheets[firstSheetName]) {
+  const sheetNames = parsed.SheetNames.filter(
+    (sheetName) => Boolean(sheetName) && Boolean(parsed.Sheets[sheetName])
+  )
+  if (sheetNames.length === 0) {
     throw new Error(`No worksheets found in "${name}".`)
   }
 
-  return { workbookName: name, sheet: parsed.Sheets[firstSheetName] }
+  const requested = options.worksheetName?.trim() ?? ""
+  if (requested && !sheetNames.includes(requested)) {
+    if (options.requireWorksheet) {
+      throw new Error(`Worksheet "${requested}" was not found in "${name}".`)
+    }
+  }
+
+  const sheetName =
+    requested && sheetNames.includes(requested) ? requested : sheetNames[0]
+
+  return {
+    workbookName: name,
+    sheet: parsed.Sheets[sheetName],
+    sheetName,
+    sheetNames,
+  }
 }
 
 const WORKBOOK_COLUMN_SAMPLE_ROWS = 50
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function isIsoDateString(value: unknown): boolean {
+  if (typeof value !== "string") return false
+  const match = ISO_DATE_RE.exec(value.trim())
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
+}
+
+function formatLocalIsoDate(date: Date): string | null {
+  if (Number.isNaN(date.getTime())) return null
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
 
 function isExcelDateFormat(fmt: string): boolean {
   const isDate = XLSX.SSF?.is_date as ((value: string) => boolean) | undefined
@@ -2386,6 +2440,7 @@ function isExcelDateFormat(fmt: string): boolean {
 }
 
 function cellLooksLikeDate(cell: XLSX.CellObject): boolean {
+  if (isIsoDateString(cell.v) || isIsoDateString(cell.w)) return true
   if (cell.t === "d") return true
   if (cell.v instanceof Date && !Number.isNaN(cell.v.getTime())) return true
   if (cell.z == null) return false
@@ -2449,24 +2504,9 @@ function inferColumnKind(
   return "unknown"
 }
 
-/**
- * First-row headers from the given workbook, with value kinds inferred from
- * cell types and Excel number formats (dates vs text vs numbers).
- */
-export async function listReferenceWorkbookColumns(
-  accessToken: string,
-  workbookName: string
-): Promise<{ workbookName: string; columns: WorkbookColumn[] }> {
-  const { workbookName: name, sheet } = await loadWorkbookSheet(
-    accessToken,
-    workbookName,
-    { type: "buffer", cellDates: true, cellNF: true }
-  )
-
+function columnsFromSheet(sheet: XLSX.WorkSheet): WorkbookColumn[] {
   const ref = sheet["!ref"]
-  if (!ref) {
-    return { workbookName: name, columns: [] }
-  }
+  if (!ref) return []
 
   const range = XLSX.utils.decode_range(ref)
   const seen = new Set<string>()
@@ -2485,7 +2525,36 @@ export async function listReferenceWorkbookColumns(
     })
   }
 
-  return { workbookName: name, columns }
+  return columns
+}
+
+/**
+ * First-row headers from the given workbook page, with value kinds inferred
+ * from cell types, YYYY-MM-DD text, and Excel number formats.
+ */
+export async function listReferenceWorkbookColumns(
+  accessToken: string,
+  workbookName: string,
+  worksheetName?: string
+): Promise<{
+  workbookName: string
+  sheetName: string
+  sheets: string[]
+  columns: WorkbookColumn[]
+}> {
+  const { workbookName: name, sheet, sheetName, sheetNames } =
+    await loadWorkbookSheet(accessToken, workbookName, {
+      type: "buffer",
+      cellDates: true,
+      cellNF: true,
+    }, { worksheetName })
+
+  return {
+    workbookName: name,
+    sheetName,
+    sheets: sheetNames,
+    columns: columnsFromSheet(sheet),
+  }
 }
 
 function columnLetterToIndex(letter: string): number | null {
@@ -2540,24 +2609,23 @@ function resolveColumnIndex(
 function parseWorkbookDate(value: unknown): string | null {
   if (value == null || value === "") return null
 
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10)
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    if (isIsoDateString(trimmed)) return trimmed
+    const date = new Date(trimmed)
+    return formatLocalIsoDate(date)
+  }
+
+  if (value instanceof Date) {
+    return formatLocalIsoDate(value)
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
     const parsed = XLSX.SSF.parse_date_code(value)
     if (!parsed) return null
-    const date = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d))
-    if (Number.isNaN(date.getTime())) return null
-    return date.toISOString().slice(0, 10)
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    const date = new Date(trimmed)
-    if (Number.isNaN(date.getTime())) return null
-    return date.toISOString().slice(0, 10)
+    const date = new Date(parsed.y, parsed.m - 1, parsed.d)
+    return formatLocalIsoDate(date)
   }
 
   return null
@@ -2584,6 +2652,7 @@ export async function listChildNamesFromReferenceWorkbook(
 }> {
   const config = await getAppConfig()
   const workbookName = config.referenceSheetName.trim()
+  const worksheetName = config.referenceWorksheetName.trim()
   const column = config.childNameColumn.trim()
   const edcColumn = config.edcColumn.trim()
 
@@ -2597,10 +2666,15 @@ export async function listChildNamesFromReferenceWorkbook(
     throw new Error("EDC column is not configured.")
   }
 
-  const { sheet } = await loadWorkbookSheet(accessToken, workbookName, {
-    type: "buffer",
-    cellDates: true,
-  })
+  const { sheet } = await loadWorkbookSheet(
+    accessToken,
+    workbookName,
+    {
+      type: "buffer",
+      cellDates: true,
+    },
+    { worksheetName, requireWorksheet: Boolean(worksheetName) }
+  )
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: "",
