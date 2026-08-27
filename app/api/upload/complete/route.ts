@@ -54,8 +54,7 @@ export async function POST(request: NextRequest) {
       ])
 
       const childName = link?.childName?.trim() ?? ""
-      const recipient = config.uploadNotificationEmail.trim()
-      const recipients = recipient ? [recipient] : []
+      const recipients = config.uploadNotificationEmails
 
       if (childName) {
         const result = await sendUploadNotificationEmail({

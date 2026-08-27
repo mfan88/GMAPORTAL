@@ -66,6 +66,8 @@ type AppConfigOverrides = {
   childNameColumn?: string
   edcColumn?: string
   allowedAdminEmails?: string[]
+  uploadNotificationEmails?: string[]
+  /** @deprecated Read/write alias for a single notification email. */
   uploadNotificationEmail?: string
   sharePointSiteId?: string
   sharePointSiteUrl?: string
@@ -116,6 +118,18 @@ function asEmailList(value: unknown): string[] | undefined {
   return [...new Set(emails)]
 }
 
+function asNotificationEmails(raw: Record<string, unknown>): string[] | undefined {
+  if ("uploadNotificationEmails" in raw) {
+    return asEmailList(raw.uploadNotificationEmails) ?? []
+  }
+  if ("uploadNotificationEmail" in raw) {
+    const single = asOptionalString(raw.uploadNotificationEmail)
+    if (single === undefined) return undefined
+    return single ? [normalizeEmail(single)] : []
+  }
+  return undefined
+}
+
 function normalizeOverrides(raw: unknown): AppConfigOverrides {
   if (!isPlainObject(raw)) return {}
 
@@ -142,7 +156,7 @@ function normalizeOverrides(raw: unknown): AppConfigOverrides {
     childNameColumn: asNonEmptyString(raw.childNameColumn),
     edcColumn: asNonEmptyString(raw.edcColumn),
     allowedAdminEmails: asEmailList(raw.allowedAdminEmails),
-    uploadNotificationEmail: asOptionalString(raw.uploadNotificationEmail),
+    uploadNotificationEmails: asNotificationEmails(raw),
     sharePointSiteId: asOptionalString(raw.sharePointSiteId),
     sharePointSiteUrl: asOptionalString(raw.sharePointSiteUrl),
     sharePointSiteName: asOptionalString(raw.sharePointSiteName),
@@ -166,10 +180,9 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
     edcColumn: overrides.edcColumn ?? DEFAULT_APP_CONFIG.edcColumn,
     allowedAdminEmails:
       overrides.allowedAdminEmails ?? DEFAULT_APP_CONFIG.allowedAdminEmails,
-    uploadNotificationEmail: normalizeEmail(
-      overrides.uploadNotificationEmail ??
-        DEFAULT_APP_CONFIG.uploadNotificationEmail
-    ),
+    uploadNotificationEmails:
+      overrides.uploadNotificationEmails ??
+      DEFAULT_APP_CONFIG.uploadNotificationEmails,
     sharePointSiteId:
       overrides.sharePointSiteId ?? DEFAULT_APP_CONFIG.sharePointSiteId,
     sharePointSiteUrl:
@@ -188,13 +201,15 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
   }
 }
 
-function notificationEmailOnAllowlist(
-  email: string | undefined,
-  allowed: string[]
-) {
-  const normalized = typeof email === "string" ? normalizeEmail(email) : ""
-  if (!normalized) return ""
-  return allowed.includes(normalized) ? normalized : ""
+function notificationEmailsOnAllowlist(emails: string[] | undefined, allowed: string[]) {
+  if (!emails?.length) return []
+  return [
+    ...new Set(
+      emails
+        .map(normalizeEmail)
+        .filter((email) => email.length > 0 && allowed.includes(email))
+    ),
+  ]
 }
 
 /** Effective config: Redis overrides merged over code defaults. */
@@ -211,8 +226,8 @@ export async function getAppConfig(): Promise<AppConfig> {
     return {
       ...merged,
       allowedAdminEmails,
-      uploadNotificationEmail: notificationEmailOnAllowlist(
-        merged.uploadNotificationEmail,
+      uploadNotificationEmails: notificationEmailsOnAllowlist(
+        merged.uploadNotificationEmails,
         allowedAdminEmails
       ),
     }
@@ -222,12 +237,26 @@ export async function getAppConfig(): Promise<AppConfig> {
       ...DEFAULT_APP_CONFIG,
       fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
       allowedAdminEmails,
-      uploadNotificationEmail: notificationEmailOnAllowlist(
-        DEFAULT_APP_CONFIG.uploadNotificationEmail,
+      uploadNotificationEmails: notificationEmailsOnAllowlist(
+        DEFAULT_APP_CONFIG.uploadNotificationEmails,
         allowedAdminEmails
       ),
     }
   }
+}
+
+function resolveNotificationEmailsPatch(
+  patch: AppConfigOverrides,
+  existing: AppConfigOverrides
+): string[] | undefined {
+  if (patch.uploadNotificationEmails !== undefined) {
+    return [...new Set(patch.uploadNotificationEmails.map(normalizeEmail).filter(Boolean))]
+  }
+  if (typeof patch.uploadNotificationEmail === "string") {
+    const single = normalizeEmail(patch.uploadNotificationEmail)
+    return single ? [single] : []
+  }
+  return existing.uploadNotificationEmails
 }
 
 export async function updateAppConfig(
@@ -246,10 +275,7 @@ export async function updateAppConfig(
     edcColumn: patch.edcColumn ?? existing.edcColumn,
     allowedAdminEmails:
       patch.allowedAdminEmails ?? existing.allowedAdminEmails,
-    uploadNotificationEmail:
-      typeof patch.uploadNotificationEmail === "string"
-        ? normalizeEmail(patch.uploadNotificationEmail)
-        : existing.uploadNotificationEmail,
+    uploadNotificationEmails: resolveNotificationEmailsPatch(patch, existing),
     sharePointSiteId: patch.sharePointSiteId ?? existing.sharePointSiteId,
     sharePointSiteUrl: patch.sharePointSiteUrl ?? existing.sharePointSiteUrl,
     sharePointSiteName:
@@ -280,19 +306,24 @@ export async function updateAppConfig(
       ...envAllowedAdminEmails(),
     ]),
   ]
-  const notify = next.uploadNotificationEmail
-    ? normalizeEmail(next.uploadNotificationEmail)
-    : ""
-  if (notify && !allowedAdminEmails.includes(notify)) {
-    if (typeof patch.uploadNotificationEmail === "string") {
-      throw new Error(
-        "Upload notification email must be one of the allowed admin emails."
-      )
-    }
-    next.uploadNotificationEmail = ""
-  } else {
-    next.uploadNotificationEmail = notify
+  const notify = notificationEmailsOnAllowlist(
+    next.uploadNotificationEmails,
+    allowedAdminEmails
+  )
+  const patchTouchesNotification =
+    patch.uploadNotificationEmails !== undefined ||
+    typeof patch.uploadNotificationEmail === "string"
+  if (
+    patchTouchesNotification &&
+    (next.uploadNotificationEmails ?? []).some(
+      (email) => email && !allowedAdminEmails.includes(normalizeEmail(email))
+    )
+  ) {
+    throw new Error(
+      "Upload notification emails must be allowlisted admin emails."
+    )
   }
+  next.uploadNotificationEmails = notify
 
   await redis.set(CONFIG_KEY, next)
   return getAppConfig()

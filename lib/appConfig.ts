@@ -28,10 +28,10 @@ export type AppConfig = {
    */
   allowedAdminEmails: string[]
   /**
-   * Allowlisted admin email that receives a notice after a successful parent
-   * upload. Empty until one is chosen on the setup page.
+   * Allowlisted admin emails that receive a notice after a successful parent
+   * upload. Empty until chosen on the setup page.
    */
-  uploadNotificationEmail: string
+  uploadNotificationEmails: string[]
   /** Graph site ID of the connected SharePoint site (e.g. "contoso.sharepoint.com,guid,guid"). */
   sharePointSiteId: string
   /** SharePoint site URL as entered/resolved at connect time (for display). */
@@ -58,7 +58,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   childNameColumn: "Child Name",
   edcColumn: "EDC",
   allowedAdminEmails: ["marcusfan06@outlook.com"],
-  uploadNotificationEmail: "",
+  uploadNotificationEmails: [],
   sharePointSiteId: "",
   sharePointSiteUrl: "",
   sharePointSiteName: "",
