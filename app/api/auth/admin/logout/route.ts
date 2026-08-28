@@ -4,6 +4,7 @@ import {
   clearAdminAccessCookieHeader,
   clearAuthFlowCookieHeader,
   clearPkceCookieHeader,
+  clearUploadAccessCookieHeader,
   getMicrosoftLogoutUrl,
   publicUrl,
 } from "@/lib/server/index";
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
     status: 307,
   });
   response.headers.append("Set-Cookie", clearAdminAccessCookieHeader());
+  response.headers.append("Set-Cookie", clearUploadAccessCookieHeader());
   response.headers.append("Set-Cookie", clearPkceCookieHeader());
   response.headers.append("Set-Cookie", clearAuthFlowCookieHeader());
   return response;

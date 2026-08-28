@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
+  createAdminAccessCookieHeader,
+  getAdminAccessUsername,
   getAppConfig,
   linkExpirySeconds,
   getPublicSiteOrigin,
@@ -12,9 +14,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  if (
-    !(await hasValidAdminAccess(request.headers.get("cookie") ?? undefined))
-  ) {
+  const cookieHeader = request.headers.get("cookie") ?? undefined;
+  if (!(await hasValidAdminAccess(cookieHeader))) {
     return NextResponse.json(
       { error: "Admin access required" },
       { status: 401 }
@@ -70,8 +71,7 @@ export async function POST(request: NextRequest) {
     ]);
     const origin = getPublicSiteOrigin(toRequestShape(request));
     const url = `${origin}/portalaccess/${token}`;
-
-    return NextResponse.json({
+    const response = NextResponse.json({
       token,
       url,
       createdAt,
@@ -81,6 +81,14 @@ export async function POST(request: NextRequest) {
       state,
       expiresInSeconds: linkExpirySeconds(config),
     });
+    const username = getAdminAccessUsername(cookieHeader);
+    if (username) {
+      response.headers.append(
+        "Set-Cookie",
+        createAdminAccessCookieHeader(username)
+      );
+    }
+    return response;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not generate link";
