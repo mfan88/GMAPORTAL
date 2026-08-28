@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { DocArticle } from "@/components/docsChrome";
-import CreateLinkNowWalkthrough from "@/components/scribe/create-link-now";
+import {
+  CreateLinkNowWalkthrough,
+  CreateScheduledLinkWalkthrough,
+} from "@/components/scribeComponents";
 
 export default function GenerateALinkPage() {
   return (
@@ -18,14 +21,17 @@ export default function GenerateALinkPage() {
         .
       </p>
 
-      <h2>Walkthrough</h2>
+      <h2>Walkthroughs</h2>
       <p>
         Open the console, choose the child, generate the link, then copy it from{" "}
         <strong>Active Links</strong>. Names come from the reference Excel
         workbook in Settings. The URL looks like{" "}
         <code>https://upload.develop.bc.ca/link/…</code>
       </p>
-      <CreateLinkNowWalkthrough />
+      <div className="space-y-3">
+        <CreateLinkNowWalkthrough />
+        <CreateScheduledLinkWalkthrough />
+      </div>
       <p>
         Send that full URL to the parent through your usual clinic channel
         (secure messaging, email, SMS — whatever your clinic already uses).
