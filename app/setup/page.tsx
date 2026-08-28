@@ -589,18 +589,27 @@ export default function ConsolePage() {
   })()
 
   return (
-    <div className="min-h-screen w-full bg-white text-black">
-      <header className="box-border flex h-24 items-center justify-between gap-4 p-4">
-        <Image
-          className="h-full w-auto"
-          src="/images/dda-logo.svg"
-          alt="DDA logo"
-          width={1338}
-          height={472}
-        />
+    <div className="flex min-h-dvh w-full flex-col bg-white text-black lg:h-dvh lg:max-h-dvh lg:overflow-hidden">
+      <header className="box-border flex shrink-0 items-start justify-between gap-3 p-3 sm:gap-4 sm:p-4">
+        <div className="flex min-w-0 flex-col gap-1">
+          <Image
+            className="h-10 w-auto sm:h-14 lg:h-16"
+            src="/images/dda-logo.svg"
+            alt="DDA logo"
+            width={1338}
+            height={472}
+          />
+          <Link
+            href="/"
+            className="w-fit text-xs underline underline-offset-4 sm:text-sm"
+          >
+            {"<<<"} Back to upload portal
+          </Link>
+        </div>
         <Button
           variant="outline"
           size="sm"
+          className="shrink-0"
           onClick={() => {
             window.location.assign("/api/auth/admin/logout")
           }}
@@ -609,15 +618,15 @@ export default function ConsolePage() {
         </Button>
       </header>
 
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pb-16">
-        <h1 className="text-center text-3xl font-medium">
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-3 pb-6 sm:px-6 lg:min-h-0 lg:overflow-hidden lg:pb-4">
+        <h1 className="shrink-0 px-1 text-center text-lg font-medium sm:text-2xl lg:text-3xl">
           General Movements Assessment (GMA) Video Portal Console
         </h1>
 
         {banner && (
           <Alert
             variant={banner.type === "error" ? "destructive" : "default"}
-            className="mx-auto max-w-2xl"
+            className="mx-auto w-full max-w-2xl shrink-0"
           >
             <AlertTitle>
               {banner.type === "error" ? "Something went wrong" : "Success"}
@@ -626,8 +635,8 @@ export default function ConsolePage() {
           </Alert>
         )}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <section className="flex min-h-[22rem] flex-col rounded-xl border border-black/15 p-5 shadow-sm">
+        <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-3 lg:overflow-hidden">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-black/15 p-4 shadow-sm sm:p-5 lg:min-h-0">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Current Status</span>
               <span className="flex items-center gap-2 text-sm">
@@ -752,7 +761,7 @@ export default function ConsolePage() {
               </span>
             </div>
 
-            <div className="mt-3 flex-1 overflow-y-auto pr-1">
+            <div className="mt-3 max-h-64 min-h-0 overflow-y-auto overscroll-contain pr-1 sm:max-h-80 lg:max-h-none lg:flex-1">
               {links.length === 0 ? (
                 <p className="text-sm text-black/40">
                   No active links yet. Generate one to share with a parent.
@@ -827,13 +836,13 @@ export default function ConsolePage() {
             </div>
           </section>
 
-          <section className="flex min-h-[22rem] flex-col rounded-xl border border-black/15 p-6 shadow-sm">
+          <section className="flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-xl border border-black/15 p-4 shadow-sm sm:p-6">
             <div className="flex flex-1 flex-col gap-3">
               <span className="text-sm font-medium">Create New Link</span>
               {childPickerContent}
             </div>
             <Button
-              className="mt-4 py-10"
+              className="mt-4 py-4 sm:py-10"
               size="sm"
               disabled={!canGenerateLink}
               onClick={generateLink}
@@ -851,10 +860,6 @@ export default function ConsolePage() {
             }}
           />
         </div>
-
-        <Link href="/" className="mx-auto text-sm underline">
-          Back to upload portal
-        </Link>
       </main>
     </div>
   )

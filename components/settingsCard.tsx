@@ -806,7 +806,7 @@ export default function SettingsCard({
   }
 
   return (
-    <section className="flex min-h-[22rem] flex-col rounded-xl border border-black/15 p-5 shadow-sm">
+    <section className="flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-xl border border-black/15 p-4 shadow-sm sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium">Settings</span>
         {!editing ? (
