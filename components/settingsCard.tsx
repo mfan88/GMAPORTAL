@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Combobox } from "@/components/ui/combobox"
+import { toast } from "sonner"
 import {
   Select,
   SelectContent,
@@ -15,6 +16,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+
+function notify(
+  banner: { type: "success" | "error"; message: string } | null
+) {
+  if (!banner) return
+  if (banner.type === "error") toast.error(banner.message)
+  else toast.success(banner.message)
+}
 
 type DriveOption = { id: string; name: string }
 
@@ -395,11 +404,9 @@ function AdminEmailsCard({
 
 export default function SettingsCard({
   connected,
-  onBanner,
   onConfigSaved,
 }: Readonly<{
   connected: boolean
-  onBanner: (banner: { type: "success" | "error"; message: string } | null) => void
   onConfigSaved?: () => void
 }>) {
   const [editing, setEditing] = useState(false)
@@ -445,9 +452,9 @@ export default function SettingsCard({
       if (isBenignFetchInterruption(error)) return
       const message =
         error instanceof Error ? error.message : "Could not load SharePoint items"
-      onBanner({ type: "error", message })
+      notify({ type: "error", message })
     }
-  }, [connected, onBanner])
+  }, [connected, notify])
 
   const load = useCallback(async () => {
     try {
@@ -465,11 +472,11 @@ export default function SettingsCard({
       if (isBenignFetchInterruption(error)) return
       const message =
         error instanceof Error ? error.message : "Could not load settings"
-      onBanner({ type: "error", message })
+      notify({ type: "error", message })
     } finally {
       setLoading(false)
     }
-  }, [loadBrowse, onBanner])
+  }, [loadBrowse, notify])
 
   useEffect(() => {
     let cancelled = false
@@ -675,17 +682,17 @@ export default function SettingsCard({
   const confirmAddEmail = () => {
     const email = normalizeEmail(newEmail)
     if (!email) {
-      onBanner({ type: "error", message: "Enter an email address." })
+      notify({ type: "error", message: "Enter an email address." })
       return
     }
     if (!isValidEmail(email)) {
-      onBanner({ type: "error", message: "Enter a valid email address." })
+      notify({ type: "error", message: "Enter a valid email address." })
       return
     }
     setForm((prev) => {
       if (!prev) return prev
       if (prev.allowedAdminEmails.includes(email)) {
-        onBanner({ type: "error", message: "That email is already on the list." })
+        notify({ type: "error", message: "That email is already on the list." })
         return prev
       }
       return {
@@ -695,7 +702,6 @@ export default function SettingsCard({
     })
     setNewEmail("")
     setPendingRemoveEmail(null)
-    onBanner(null)
   }
 
   const requestRemoveEmail = (email: string) => {
@@ -719,58 +725,58 @@ export default function SettingsCard({
   const save = async () => {
     if (!form) return
     if (!form.folderName.trim()) {
-      onBanner({ type: "error", message: "Upload folder is required." })
+      notify({ type: "error", message: "Upload folder is required." })
       return
     }
     if (!form.referenceSheetName.trim()) {
-      onBanner({ type: "error", message: "Reference workbook is required." })
+      notify({ type: "error", message: "Reference workbook is required." })
       return
     }
     if (!form.referenceWorksheetName.trim()) {
-      onBanner({ type: "error", message: "Workbook page is required." })
+      notify({ type: "error", message: "Workbook page is required." })
       return
     }
     if (!form.childNameColumn.trim()) {
-      onBanner({ type: "error", message: "Child name column is required." })
+      notify({ type: "error", message: "Child name column is required." })
       return
     }
     if (!form.edcColumn.trim()) {
-      onBanner({ type: "error", message: "EDC column is required." })
+      notify({ type: "error", message: "EDC column is required." })
       return
     }
     if (
       form.childNameColumn.trim().toLowerCase() ===
       form.edcColumn.trim().toLowerCase()
     ) {
-      onBanner({
+      notify({
         type: "error",
         message: "Child name column and EDC column cannot be the same.",
       })
       return
     }
     if (parseDurationInput(form.bufferValue) === null) {
-      onBanner({
+      notify({
         type: "error",
         message: "Link buffer requires a number (0 or greater).",
       })
       return
     }
     if (parseDurationInput(form.expiryValue) === null) {
-      onBanner({
+      notify({
         type: "error",
         message: "Link availability requires a number.",
       })
       return
     }
     if (parseDurationInput(form.expiryValue) === 0) {
-      onBanner({
+      notify({
         type: "error",
         message: "Link availability must be greater than 0.",
       })
       return
     }
     if (form.allowedAdminEmails.length === 0) {
-      onBanner({
+      notify({
         type: "error",
         message: "Add at least one allowed admin email.",
       })
@@ -778,7 +784,7 @@ export default function SettingsCard({
     }
 
     setSaving(true)
-    onBanner(null)
+    const savingToast = toast.loading("Saving settings...")
     try {
       const res = await fetch("/api/config", {
         method: "PUT",
@@ -794,12 +800,12 @@ export default function SettingsCard({
       setSaved(nextForm)
       setEditing(false)
       closeEmailPanel()
-      onBanner({ type: "success", message: "Settings saved." })
+      toast.success("Settings saved.", { id: savingToast })
       onConfigSaved?.()
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not save settings"
-      onBanner({ type: "error", message })
+      toast.error(message, { id: savingToast })
     } finally {
       setSaving(false)
     }

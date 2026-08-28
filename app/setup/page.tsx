@@ -7,13 +7,14 @@ import { Check, LinkIcon, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Combobox } from "@/components/ui/combobox"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Toaster } from "@/components/ui/sonner"
 import SettingsCard from "@/components/settingsCard"
 import DatePicker from "@/components/datePicker"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import type { AppConfig } from "@/lib/appConfig"
+import { toast } from "sonner"
 
 type ConnectionStatus = {
   connected: boolean
@@ -90,10 +91,6 @@ export default function ConsolePage() {
   const [letterScheduleDate, setLetterScheduleDate] = useState<
     Date | undefined
   >(undefined)
-  const [banner, setBanner] = useState<{
-    type: "success" | "error"
-    message: string
-  } | null>(null)
   const [allowedAdminEmails, setAllowedAdminEmails] = useState<string[]>([])
   const [uploadNotificationEmails, setUploadNotificationEmails] = useState<
     string[]
@@ -113,7 +110,7 @@ export default function ConsolePage() {
       .then((data: { links?: UploadLink[]; error?: string }) => {
         setLinks(data.links ?? [])
         if (data.error) {
-          setBanner({ type: "error", message: data.error })
+          toast.error(data.error)
         }
       })
       .catch(() => setLinks([]))
@@ -148,7 +145,7 @@ export default function ConsolePage() {
 
       setUploadNotificationEmails(next)
       setNotificationSaving(true)
-      setBanner(null)
+      const savingToast = toast.loading("Saving notification emails...")
       try {
         const res = await fetch("/api/config", {
           method: "PUT",
@@ -161,15 +158,15 @@ export default function ConsolePage() {
         }
         setAllowedAdminEmails(data.allowedAdminEmails ?? [])
         setUploadNotificationEmails(data.uploadNotificationEmails ?? [])
+        toast.success("Notification emails saved.", { id: savingToast })
       } catch (error) {
         setUploadNotificationEmails(previous)
-        setBanner({
-          type: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Could not save notification emails",
-        })
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Could not save notification emails",
+          { id: savingToast }
+        )
       } finally {
         setNotificationSaving(false)
       }
@@ -227,17 +224,14 @@ export default function ConsolePage() {
     if (connectedParam || grantedParam || errorParam) {
       bannerTimeout = window.setTimeout(() => {
         if (grantedParam) {
-          setBanner({
-            type: "success",
-            message:
-              "App write access granted on the SharePoint site. Uploads should work now.",
-          })
+          toast.success(
+            "App write access granted on the SharePoint site. Uploads should work now."
+          )
           loadStatus()
         } else if (connectedParam) {
-          setBanner({
-            type: "success",
-            message: "SharePoint site connected and ready to receive uploads.",
-          })
+          toast.success(
+            "SharePoint site connected and ready to receive uploads."
+          )
         } else if (errorParam) {
           const setupErrors: Record<string, string> = {
             unauthorized_admin:
@@ -251,10 +245,7 @@ export default function ConsolePage() {
             site_not_connected:
               "Connect a SharePoint site first, then grant write access.",
           }
-          setBanner({
-            type: "error",
-            message: setupErrors[errorParam] ?? errorParam,
-          })
+          toast.error(setupErrors[errorParam] ?? errorParam)
         }
       }, 0)
     }
@@ -280,10 +271,7 @@ export default function ConsolePage() {
           setCopiedToken((current) => (current === link.token ? null : current))
         }, 2000)
       } catch {
-        setBanner({
-          type: "error",
-          message: "Could not copy to clipboard",
-        })
+        toast.error("Could not copy to clipboard")
       }
     },
     [portalLinkUrl]
@@ -324,7 +312,7 @@ export default function ConsolePage() {
       .then(() => {
         setStatus({ connected: false, username: null })
         setSiteUrlInput("")
-        setBanner(null)
+        toast.success("SharePoint site disconnected.")
         setChildren([])
         setSelectedChild(null)
         setSelectedEdc(null)
@@ -338,15 +326,12 @@ export default function ConsolePage() {
   const connectSite = useCallback(async () => {
     const siteUrl = siteUrlInput.trim()
     if (!siteUrl) {
-      setBanner({
-        type: "error",
-        message: "Enter a SharePoint site URL (or Graph site id) first.",
-      })
+      toast.error("Enter a SharePoint site URL (or Graph site id) first.")
       return
     }
 
     setIsConnectingSite(true)
-    setBanner(null)
+    const connectingToast = toast.loading("Connecting SharePoint site...")
     try {
       const res = await fetch("/api/sharepoint/connect", {
         method: "POST",
@@ -364,16 +349,16 @@ export default function ConsolePage() {
         siteUrl: data.siteUrl,
         siteName: data.siteName,
       })
-      setBanner({
-        type: "success",
-        message: "SharePoint site connected. Next: grant write access if prompted.",
-      })
+      toast.success(
+        "SharePoint site connected. Next: grant write access if prompted.",
+        { id: connectingToast }
+      )
       loadStatus()
       loadChildNames()
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not connect SharePoint site"
-      setBanner({ type: "error", message })
+      toast.error(message, { id: connectingToast })
     } finally {
       setIsConnectingSite(false)
     }
@@ -431,19 +416,14 @@ export default function ConsolePage() {
 
   const generateLink = useCallback(() => {
     if (!selectedChild || !selectedEdc) {
-      setBanner({
-        type: "error",
-        message:
-          "Select a child with a valid EDC date before generating a link.",
-      })
+      toast.error(
+        "Select a child with a valid EDC date before generating a link."
+      )
       return
     }
 
     if (isSchedulingLetter && !letterScheduleDate) {
-      setBanner({
-        type: "error",
-        message: "Pick the letter schedule date before generating a link.",
-      })
+      toast.error("Pick the letter schedule date before generating a link.")
       return
     }
 
@@ -452,7 +432,7 @@ export default function ConsolePage() {
       : null
 
     setIsGenerating(true)
-    setBanner(null)
+    const generatingToast = toast.loading("Generating link...")
     void fetch("/api/generate-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -470,11 +450,12 @@ export default function ConsolePage() {
           throw new Error(data.error ?? "Could not generate link")
         }
         loadLinks()
+        toast.success("Link generated.", { id: generatingToast })
       })
       .catch((error: unknown) => {
         const message =
           error instanceof Error ? error.message : "Could not generate link"
-        setBanner({ type: "error", message })
+        toast.error(message, { id: generatingToast })
       })
       .finally(() => setIsGenerating(false))
   }, [
@@ -622,18 +603,6 @@ export default function ConsolePage() {
         <h1 className="shrink-0 px-1 text-center text-lg font-medium sm:text-2xl lg:text-3xl">
           General Movements Assessment (GMA) Video Portal Console
         </h1>
-
-        {banner && (
-          <Alert
-            variant={banner.type === "error" ? "destructive" : "default"}
-            className="mx-auto w-full max-w-2xl shrink-0"
-          >
-            <AlertTitle>
-              {banner.type === "error" ? "Something went wrong" : "Success"}
-            </AlertTitle>
-            <AlertDescription>{banner.message}</AlertDescription>
-          </Alert>
-        )}
 
         <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-3 lg:overflow-hidden">
           <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-black/15 p-4 shadow-sm sm:p-5 lg:min-h-0">
@@ -853,7 +822,6 @@ export default function ConsolePage() {
 
           <SettingsCard
             connected={connected}
-            onBanner={setBanner}
             onConfigSaved={() => {
               loadChildNames()
               loadConfig()
@@ -861,6 +829,7 @@ export default function ConsolePage() {
           />
         </div>
       </main>
+      <Toaster position="bottom-right" richColors closeButton />
     </div>
   )
 }
