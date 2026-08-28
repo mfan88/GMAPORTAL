@@ -16,6 +16,7 @@ type WorksheetRef = { id: string; name: string };
 type UsedRange = {
   address?: string;
   values?: unknown[][];
+  numberFormat?: unknown[][];
 };
 
 type RangePayload = {
@@ -149,6 +150,114 @@ function mapRowByHeaders(
   });
 }
 
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DATE_HEADER_HINTS = [
+  "date",
+  "edc",
+  "received",
+  "dob",
+  "born",
+  "due",
+  "birthday",
+];
+
+function formatIsoDate(year: number, month: number, day: number): string | null {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return null;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function excelSerialToIso(serial: number): string | null {
+  if (!Number.isFinite(serial)) return null;
+  const whole = Math.floor(serial);
+  if (whole < 20000 || whole > 80000) return null;
+  const utc = Date.UTC(1899, 11, 30) + whole * 86400000;
+  const date = new Date(utc);
+  if (Number.isNaN(date.getTime())) return null;
+  return formatIsoDate(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate()
+  );
+}
+
+function parseToIsoDate(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") return excelSerialToIso(value);
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const iso = ISO_DATE_RE.exec(trimmed);
+  if (iso) {
+    return formatIsoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  }
+
+  const ymd = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/.exec(trimmed);
+  if (ymd) {
+    return formatIsoDate(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+  }
+
+  const dmyOrMdy = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(trimmed);
+  if (dmyOrMdy) {
+    const first = Number(dmyOrMdy[1]);
+    const second = Number(dmyOrMdy[2]);
+    const year = Number(dmyOrMdy[3]);
+    if (first > 12) return formatIsoDate(year, second, first);
+    if (second > 12) return formatIsoDate(year, first, second);
+    return formatIsoDate(year, first, second);
+  }
+
+  return null;
+}
+
+function isDateHeader(header: string): boolean {
+  const stemmed = stemHeader(header);
+  if (!stemmed) return false;
+  const tokens = stemmed.split(" ");
+  return DATE_HEADER_HINTS.some(
+    (hint) => tokens.includes(hint) || stemmed === hint
+  );
+}
+
+function isDateNumberFormat(fmt: unknown): boolean {
+  const text = cellText(fmt).toLowerCase();
+  if (!text) return false;
+  return /y{2,4}/.test(text) && /d/.test(text) && /m/.test(text);
+}
+
+function formatDateColumns(
+  destHeaders: unknown[],
+  destFormats: unknown[] | undefined,
+  values: unknown[]
+): { values: unknown[]; numberFormat: unknown[] } {
+  const numberFormat: unknown[] = destHeaders.map(() => null);
+  const next = values.map((value, index) => {
+    const header = cellText(destHeaders[index]);
+    const dateColumn =
+      isDateHeader(header) || isDateNumberFormat(destFormats?.[index]);
+    if (!dateColumn) return value;
+    const iso = parseToIsoDate(value);
+    if (!iso) return value;
+    numberFormat[index] = "yyyy-mm-dd";
+    return iso;
+  });
+  return { values: next, numberFormat };
+}
+
 function todayIsoDate() {
   const now = new Date();
   const year = now.getFullYear();
@@ -270,7 +379,7 @@ async function getUsedRange(
   sheet: WorksheetRef
 ): Promise<UsedRange> {
   return fetchGraphJson<UsedRange>(
-    `${workbookBase}/${worksheetPath(sheet)}/usedRange?$select=address,values`,
+    `${workbookBase}/${worksheetPath(sheet)}/usedRange?$select=address,values,numberFormat`,
     accessToken,
     sessionInit(sessionId)
   );
@@ -535,6 +644,11 @@ export async function moveEditedRowToDoneSheet(
     const destRow = nextClearDataRow(destUsed);
     const destHeaders = destUsed.values?.[0] ?? [];
     const mapped = mapRowByHeaders(sourceHeaders, rowValues, destHeaders);
+    const dated = formatDateColumns(
+      destHeaders,
+      destUsed.numberFormat?.[0],
+      mapped
+    );
 
     await patchRow(
       workbookBase,
@@ -543,7 +657,8 @@ export async function moveEditedRowToDoneSheet(
       doneSheet,
       destRow,
       destStartCol,
-      mapped
+      dated.values,
+      dated.numberFormat
     );
 
     await deleteOrClearRow(
