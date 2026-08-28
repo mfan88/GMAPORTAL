@@ -953,9 +953,7 @@ export default function SettingsCard({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <p className="text-xs text-black/45">
-              Tab inside the selected workbook. Columns are read from this page.
-            </p>
+
           </div>
 
           <div className="grid grid-cols-2 gap-3">
