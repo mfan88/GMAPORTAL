@@ -11,9 +11,21 @@ const RECEIVED_COLUMN = "video received";
 
 type WorkbookSession = { id?: string };
 
+type WorksheetRef = { id: string; name: string };
+
 type UsedRange = {
   address?: string;
   values?: unknown[][];
+};
+
+type RangePayload = {
+  values?: unknown[][];
+  numberFormat?: unknown[][];
+};
+
+export type EditedWorkbookRow = {
+  sheetName: string;
+  row: number;
 };
 
 function cellText(value: unknown): string {
@@ -23,6 +35,14 @@ function cellText(value: unknown): string {
     return String(value).trim();
   }
   return "";
+}
+
+function graphCellValue(value: unknown): string | number | boolean {
+  if (value == null) return "";
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value;
+  return cellText(value);
 }
 
 function columnIndexToLetter(index: number): string {
@@ -36,14 +56,35 @@ function columnIndexToLetter(index: number): string {
   return letters;
 }
 
+function lettersToColumnIndex(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) {
+    n = n * 26 + (ch.charCodeAt(0) - 64);
+  }
+  return n - 1;
+}
+
+function parseA1Start(address?: string): { row: number; col: number } {
+  if (!address) return { row: 1, col: 0 };
+  const local = address
+    .replace(/^.*!/, "")
+    .replace(/\$/g, "")
+    .split(":")[0]
+    ?.trim();
+  const match = /^([A-Za-z]+)(\d+)$/.exec(local ?? "");
+  if (!match) return { row: 1, col: 0 };
+  return {
+    row: Number(match[2]),
+    col: lettersToColumnIndex(match[1]),
+  };
+}
+
 function headerColumnIndex(headerRow: unknown[], spec: string): number {
   const target = spec.trim();
   if (!target) return -1;
-  const byName = headerRow.findIndex(
+  return headerRow.findIndex(
     (cell) => cellText(cell).toLowerCase() === target.toLowerCase()
   );
-  if (byName !== -1) return byName;
-  return -1;
 }
 
 function todayIsoDate() {
@@ -52,6 +93,40 @@ function todayIsoDate() {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function sessionInit(sessionId: string, init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  headers.set("Workbook-Session-Id", sessionId);
+  if (init?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  return { ...init, headers };
+}
+
+function worksheetPath(sheet: WorksheetRef) {
+  return `worksheets/${encodeURIComponent(sheet.id)}`;
+}
+
+function resolveWorksheet(
+  sheets: WorksheetRef[],
+  wanted: string
+): WorksheetRef | undefined {
+  const target = wanted.trim().toLowerCase();
+  if (!target) return undefined;
+  return (
+    sheets.find((sheet) => sheet.name.trim().toLowerCase() === target) ??
+    sheets.find((sheet) => {
+      const name = sheet.name.trim().toLowerCase();
+      if (target.includes("done")) {
+        return name.includes("done") && name.includes("received");
+      }
+      if (target.includes("to send")) {
+        return name.includes("to send");
+      }
+      return false;
+    })
+  );
 }
 
 async function withWorkbookSession<T>(
@@ -86,25 +161,7 @@ async function withWorkbookSession<T>(
   }
 }
 
-function sessionInit(sessionId: string, init?: RequestInit): RequestInit {
-  const headers = new Headers(init?.headers);
-  headers.set("Workbook-Session-Id", sessionId);
-  if (init?.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  return { ...init, headers };
-}
-
-/**
- * After a parent upload, find that child's row on the GMA tracking sheets
- * (by the configured name column) and stamp a received-date column.
- */
-export async function fillUploadReceived(childName: string): Promise<void> {
-  const name = childName.trim();
-  if (!name) {
-    throw new Error("A child name is required to update the workbook.");
-  }
-
+async function openReferenceWorkbook() {
   const config = await getAppConfig();
   const workbookName = config.referenceSheetName.trim();
   const nameColumn = config.childNameColumn.trim();
@@ -121,71 +178,322 @@ export async function fillUploadReceived(childName: string): Promise<void> {
     throw new Error(`Reference workbook "${workbookName}" was not found.`);
   }
 
-  const workbookBase = `${driveBaseFromId(workbook.driveId)}/items/${encodeURIComponent(workbook.id)}/workbook`;
-  const sheetsToSearch = [
+  return {
+    accessToken,
+    nameColumn,
+    referenceWorksheetName: config.referenceWorksheetName.trim(),
+    workbookBase: `${driveBaseFromId(workbook.driveId)}/items/${encodeURIComponent(workbook.id)}/workbook`,
+  };
+}
+
+async function listWorksheets(
+  workbookBase: string,
+  accessToken: string,
+  sessionId: string
+): Promise<WorksheetRef[]> {
+  const payload = await fetchGraphJson<{ value?: WorksheetRef[] }>(
+    `${workbookBase}/worksheets?$select=id,name`,
+    accessToken,
+    sessionInit(sessionId)
+  );
+  return (payload.value ?? []).filter(
+    (sheet): sheet is WorksheetRef => Boolean(sheet?.id && sheet?.name)
+  );
+}
+
+async function getUsedRange(
+  workbookBase: string,
+  accessToken: string,
+  sessionId: string,
+  sheet: WorksheetRef
+): Promise<UsedRange> {
+  return fetchGraphJson<UsedRange>(
+    `${workbookBase}/${worksheetPath(sheet)}/usedRange?$select=address,values`,
+    accessToken,
+    sessionInit(sessionId)
+  );
+}
+
+function findChildRow(
+  used: UsedRange,
+  childName: string,
+  nameColumn: string
+): { excelRow: number; rowValues: unknown[]; headerRow: unknown[] } | null {
+  const values = used.values ?? [];
+  if (values.length < 2) return null;
+  const start = parseA1Start(used.address);
+  const headerRow = values[0] ?? [];
+  const nameCol = headerColumnIndex(headerRow, nameColumn);
+  if (nameCol < 0) return null;
+  const target = childName.trim().toLowerCase();
+  const dataIndex = values.slice(1).findIndex((row) => {
+    return cellText((row ?? [])[nameCol]).toLowerCase() === target;
+  });
+  if (dataIndex < 0) return null;
+  return {
+    excelRow: start.row + 1 + dataIndex,
+    rowValues: [...(values[dataIndex + 1] ?? [])],
+    headerRow,
+  };
+}
+
+function nextClearDataRow(used: UsedRange): number {
+  const values = used.values ?? [];
+  const start = parseA1Start(used.address);
+  let lastOccupied = start.row;
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] ?? [];
+    if (row.some((cell) => cellText(cell))) {
+      lastOccupied = start.row + i;
+    }
+  }
+  return lastOccupied + 1;
+}
+
+async function patchRow(
+  workbookBase: string,
+  accessToken: string,
+  sessionId: string,
+  sheet: WorksheetRef,
+  excelRow: number,
+  startCol: number,
+  values: unknown[],
+  numberFormat?: unknown[]
+) {
+  const cells = values.map(graphCellValue);
+  const lastCol = columnIndexToLetter(startCol + Math.max(cells.length, 1) - 1);
+  const start = `${columnIndexToLetter(startCol)}${excelRow}`;
+  const body: RangePayload = { values: [cells] };
+  if (numberFormat?.length) {
+    body.numberFormat = [numberFormat];
+  }
+  await fetchGraphJson(
+    `${workbookBase}/${worksheetPath(sheet)}/range(address='${start}:${lastCol}${excelRow}')`,
+    accessToken,
+    sessionInit(sessionId, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    })
+  );
+}
+
+async function deleteOrClearRow(
+  workbookBase: string,
+  accessToken: string,
+  sessionId: string,
+  sheet: WorksheetRef,
+  excelRow: number,
+  startCol: number,
+  columnCount: number
+) {
+  const lastCol = columnIndexToLetter(startCol + Math.max(columnCount, 1) - 1);
+  const address = `${columnIndexToLetter(startCol)}${excelRow}:${lastCol}${excelRow}`;
+  try {
+    await fetchGraphJson(
+      `${workbookBase}/${worksheetPath(sheet)}/range(address='${address}')/delete`,
+      accessToken,
+      sessionInit(sessionId, {
+        method: "POST",
+        body: JSON.stringify({ shift: "Up" }),
+      })
+    );
+  } catch (error) {
+    console.error("Workbook row delete failed, clearing cells instead:", error);
+    await patchRow(
+      workbookBase,
+      accessToken,
+      sessionId,
+      sheet,
+      excelRow,
+      startCol,
+      Array.from({ length: Math.max(columnCount, 1) }, () => "")
+    );
+  }
+}
+
+/**
+ * After a parent upload, find that child's row and stamp today's date
+ * (YYYY-MM-DD) in the video-received column.
+ */
+export async function fillUploadReceived(
+  childName: string
+): Promise<EditedWorkbookRow> {
+  const name = childName.trim();
+  if (!name) {
+    throw new Error("A child name is required to update the workbook.");
+  }
+
+  const { accessToken, nameColumn, referenceWorksheetName, workbookBase } =
+    await openReferenceWorkbook();
+
+  const wantedSheets = [
     ...new Set(
-      [
-        GMA_TO_SEND_SHEET,
-        config.referenceWorksheetName.trim(),
-        GMA_DONE_SHEET,
-      ].filter(Boolean)
+      [GMA_TO_SEND_SHEET, referenceWorksheetName, GMA_DONE_SHEET].filter(
+        Boolean
+      )
     ),
   ];
 
-  await withWorkbookSession(workbookBase, accessToken, async (sessionId) => {
-    for (const sheetName of sheetsToSearch) {
-      const sheetPath = encodeURIComponent(sheetName);
+  return withWorkbookSession(workbookBase, accessToken, async (sessionId) => {
+    const sheets = await listWorksheets(workbookBase, accessToken, sessionId);
+
+    for (const wanted of wantedSheets) {
+      const sheet = resolveWorksheet(sheets, wanted);
+      if (!sheet) continue;
+
       let used: UsedRange;
       try {
-        used = await fetchGraphJson<UsedRange>(
-          `${workbookBase}/worksheets/${sheetPath}/usedRange?$select=address,values`,
-          accessToken,
-          sessionInit(sessionId)
-        );
+        used = await getUsedRange(workbookBase, accessToken, sessionId, sheet);
       } catch {
         continue;
       }
 
-      const values = used.values ?? [];
-      if (values.length < 2) continue;
+      const found = findChildRow(used, name, nameColumn);
+      if (!found) continue;
 
-      const headerRow = values[0] ?? [];
-      const nameCol = headerColumnIndex(headerRow, nameColumn);
-      if (nameCol < 0) continue;
-
-      const dataIndex = values.slice(1).findIndex((row) => {
-        return (
-          cellText((row ?? [])[nameCol]).toLowerCase() === name.toLowerCase()
-        );
-      });
-      if (dataIndex < 0) continue;
-
-      const excelRow = dataIndex + 2;
-      const receivedCol = headerColumnIndex(headerRow, RECEIVED_COLUMN);
+      const receivedCol = headerColumnIndex(found.headerRow, RECEIVED_COLUMN);
       if (receivedCol < 0) {
         throw new Error(
-          `Found "${name}" on row ${excelRow} of "${sheetName}", but no "${RECEIVED_COLUMN}" column.`
+          `Found "${name}" on row ${found.excelRow} of "${sheet.name}", but no "${RECEIVED_COLUMN}" column.`
         );
       }
 
-      const address = `${columnIndexToLetter(receivedCol)}${excelRow}`;
+      const startCol = parseA1Start(used.address).col;
       const receivedOn = todayIsoDate();
-      await fetchGraphJson(
-        `${workbookBase}/worksheets/${sheetPath}/range(address='${address}')`,
+      await patchRow(
+        workbookBase,
         accessToken,
-        sessionInit(sessionId, {
-          method: "PATCH",
-          body: JSON.stringify({
-            values: [[receivedOn]],
-            numberFormat: [["yyyy-mm-dd"]],
-          }),
-        })
+        sessionId,
+        sheet,
+        found.excelRow,
+        startCol + receivedCol,
+        [receivedOn],
+        ["yyyy-mm-dd"]
       );
-      return;
+      return { sheetName: sheet.name, row: found.excelRow };
     }
 
+    const available = sheets.map((sheet) => sheet.name).join('", "');
     throw new Error(
-      `Could not find "${name}" on "${sheetsToSearch.join('", "')}".`
+      `Could not find "${name}" on "${wantedSheets.join('", "')}". Worksheets in file: "${available}".`
     );
+  });
+}
+
+/**
+ * Cut the child's row from the sheet it was just edited on and append it to
+ * the next empty data row on GMA done or not received.
+ */
+export async function moveEditedRowToDoneSheet(
+  childName: string,
+  edited?: EditedWorkbookRow
+): Promise<{ destRow: number }> {
+  const name = childName.trim();
+  if (!name) {
+    throw new Error("A child name is required to move the workbook row.");
+  }
+
+  const { accessToken, nameColumn, referenceWorksheetName, workbookBase } =
+    await openReferenceWorkbook();
+
+  return withWorkbookSession(workbookBase, accessToken, async (sessionId) => {
+    const sheets = await listWorksheets(workbookBase, accessToken, sessionId);
+    const doneSheet = resolveWorksheet(sheets, GMA_DONE_SHEET);
+    if (!doneSheet) {
+      throw new Error(
+        `Worksheet "${GMA_DONE_SHEET}" was not found. Worksheets in file: "${sheets
+          .map((sheet) => sheet.name)
+          .join('", "')}".`
+      );
+    }
+
+    if (edited?.sheetName) {
+      const editedSheet = resolveWorksheet(sheets, edited.sheetName);
+      if (editedSheet && editedSheet.id === doneSheet.id) {
+        return { destRow: edited.row };
+      }
+    }
+
+    const sourceWanted = [
+      ...new Set(
+        [edited?.sheetName, GMA_TO_SEND_SHEET, referenceWorksheetName].filter(
+          (sheet): sheet is string => Boolean(sheet)
+        )
+      ),
+    ];
+
+    let sourceSheet: WorksheetRef | undefined;
+    let sourceRow = 0;
+    let rowValues: unknown[] = [];
+    let sourceStartCol = 0;
+
+    for (const wanted of sourceWanted) {
+      const sheet = resolveWorksheet(sheets, wanted);
+      if (!sheet || sheet.id === doneSheet.id) continue;
+      let used: UsedRange;
+      try {
+        used = await getUsedRange(workbookBase, accessToken, sessionId, sheet);
+      } catch {
+        continue;
+      }
+      const found = findChildRow(used, name, nameColumn);
+      if (!found) continue;
+      sourceSheet = sheet;
+      sourceRow = found.excelRow;
+      rowValues = found.rowValues.map(graphCellValue);
+      sourceStartCol = parseA1Start(used.address).col;
+      break;
+    }
+
+    if (!sourceSheet || sourceRow < 2) {
+      const destUsed = await getUsedRange(
+        workbookBase,
+        accessToken,
+        sessionId,
+        doneSheet
+      );
+      const alreadyMoved = findChildRow(destUsed, name, nameColumn);
+      if (alreadyMoved) {
+        return { destRow: alreadyMoved.excelRow };
+      }
+      throw new Error(
+        `Could not find "${name}" on "${sourceWanted.join('", "')}" to move.`
+      );
+    }
+
+    const destUsed = await getUsedRange(
+      workbookBase,
+      accessToken,
+      sessionId,
+      doneSheet
+    );
+    const destStartCol = parseA1Start(destUsed.address).col;
+    const destRow = nextClearDataRow(destUsed);
+    const destHeaderCount = (destUsed.values?.[0] ?? []).length;
+    const columnCount = Math.max(rowValues.length, destHeaderCount, 1);
+    const padded = [...rowValues];
+    while (padded.length < columnCount) padded.push("");
+
+    await patchRow(
+      workbookBase,
+      accessToken,
+      sessionId,
+      doneSheet,
+      destRow,
+      destStartCol,
+      padded
+    );
+
+    await deleteOrClearRow(
+      workbookBase,
+      accessToken,
+      sessionId,
+      sourceSheet,
+      sourceRow,
+      sourceStartCol,
+      Math.max(rowValues.length, 1)
+    );
+
+    return { destRow };
   });
 }

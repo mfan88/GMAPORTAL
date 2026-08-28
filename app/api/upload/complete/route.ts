@@ -10,6 +10,7 @@ import {
   getAppConfig,
   getPortalAccessTokenFromRequest,
   getUploadLink,
+  moveEditedRowToDoneSheet,
   toRequestShape,
 } from "@/lib/server/index";
 
@@ -23,10 +24,9 @@ type CompleteBody = {
 };
 
 /**
- * Called by the client after an upload completes successfully. This consumes the
- * parent's single-use link and revokes their session cookie, so each link is
- * good for exactly one successful upload. Also emails the configured
- * allowlisted admin with the child name + file link.
+ * Called by the client after an upload completes successfully. Stamps the
+ * received date, moves that row onto the done sheet, emails the clinic, then
+ * consumes the single-use link.
  */
 export async function POST(request: NextRequest) {
   const shaped = toRequestShape(request);
@@ -52,6 +52,8 @@ export async function POST(request: NextRequest) {
     typeof body.parentReference?.driveId === "string"
       ? body.parentReference.driveId.trim()
       : "";
+  let childName = "";
+  let edited: { sheetName?: string; row?: number } = {};
 
   if (token) {
     try {
@@ -60,12 +62,20 @@ export async function POST(request: NextRequest) {
         getAppConfig(),
       ]);
 
-      const childName = link?.childName?.trim() ?? "";
+      childName = link?.childName?.trim() ?? "";
       const recipients = config.uploadNotificationEmails;
 
       if (childName) {
         try {
-          await fillUploadReceived(childName);
+          edited = await fillUploadReceived(childName);
+          try {
+            await moveEditedRowToDoneSheet(childName, {
+              sheetName: edited.sheetName ?? "",
+              row: edited.row ?? 0,
+            });
+          } catch (error) {
+            console.error("Failed to move workbook row to done sheet:", error);
+          }
         } catch (error) {
           console.error("Failed to update reference workbook:", error);
         }
@@ -103,9 +113,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Admins (no bound link) keep their access; nothing to consume.
   if (!token) {
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, childName, ...edited });
   }
 
   try {
@@ -114,7 +123,7 @@ export async function POST(request: NextRequest) {
     console.error("Failed to consume upload link:", error);
   }
 
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true, childName, ...edited });
   response.headers.append("Set-Cookie", clearUploadAccessCookieHeader());
   return response;
 }

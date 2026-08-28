@@ -155,10 +155,10 @@ async function uploadViaApiRoute(
 }
 
 /**
- * Notifies the server that an upload finished successfully so it can email the
- * clinic, consume the single-use link, and revoke the session. Best-effort: the
- * file is already safely uploaded at this point, so failures here are logged
- * but not surfaced.
+ * Notifies the server that an upload finished successfully so it can stamp the
+ * workbook, move the child's row onto the done sheet, email the clinic, and
+ * consume the single-use link. Best-effort: the file is already safely uploaded
+ * at this point, so failures here are logged but not surfaced.
  */
 async function finalizeUpload(result: OneDriveUploadResult): Promise<void> {
   try {
