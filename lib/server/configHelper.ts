@@ -152,18 +152,14 @@ function mergeConfig(overrides: AppConfigOverrides): AppConfig {
   };
 }
 
-function notificationEmailsOnAllowlist(
-  emails: string[] | undefined,
-  allowed: string[]
-) {
-  if (!emails?.length) return [];
+function uniqueNormalizedEmails(emails: string[] | undefined) {
   return [
-    ...new Set(
-      emails
-        .map(normalizeEmail)
-        .filter((email) => email.length > 0 && allowed.includes(email))
-    ),
+    ...new Set((emails ?? []).map(normalizeEmail).filter((email) => email.length > 0)),
   ];
+}
+
+function isValidEmailAddress(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 /** Effective config: Redis overrides merged over code defaults. */
@@ -180,9 +176,8 @@ export async function getAppConfig(): Promise<AppConfig> {
     return {
       ...merged,
       allowedAdminEmails,
-      uploadNotificationEmails: notificationEmailsOnAllowlist(
-        merged.uploadNotificationEmails,
-        allowedAdminEmails
+      uploadNotificationEmails: uniqueNormalizedEmails(
+        merged.uploadNotificationEmails
       ),
     };
   } catch {
@@ -191,9 +186,8 @@ export async function getAppConfig(): Promise<AppConfig> {
       ...DEFAULT_APP_CONFIG,
       fileDetails: { ...DEFAULT_APP_CONFIG.fileDetails },
       allowedAdminEmails,
-      uploadNotificationEmails: notificationEmailsOnAllowlist(
-        DEFAULT_APP_CONFIG.uploadNotificationEmails,
-        allowedAdminEmails
+      uploadNotificationEmails: uniqueNormalizedEmails(
+        DEFAULT_APP_CONFIG.uploadNotificationEmails
       ),
     };
   }
@@ -252,31 +246,16 @@ export async function updateAppConfig(
     throw new Error("Child name column and EDC column cannot be the same.");
   }
 
-  const allowedAdminEmails = [
-    ...new Set([
-      ...(
-        next.allowedAdminEmails ??
-        existing.allowedAdminEmails ??
-        DEFAULT_APP_CONFIG.allowedAdminEmails
-      ).map((email) => normalizeEmail(email)),
-      ...envAllowedAdminEmails(),
-    ]),
-  ];
-  const notify = notificationEmailsOnAllowlist(
-    next.uploadNotificationEmails,
-    allowedAdminEmails
-  );
+  const notify = uniqueNormalizedEmails(next.uploadNotificationEmails);
   const patchTouchesNotification =
     patch.uploadNotificationEmails !== undefined ||
     typeof patch.uploadNotificationEmail === "string";
   if (
     patchTouchesNotification &&
-    (next.uploadNotificationEmails ?? []).some(
-      (email) => email && !allowedAdminEmails.includes(normalizeEmail(email))
-    )
+    notify.some((email) => !isValidEmailAddress(email))
   ) {
     throw new Error(
-      "Upload notification emails must be allowlisted admin emails."
+      "Upload notification emails must be valid email addresses."
     );
   }
   next.uploadNotificationEmails = notify;

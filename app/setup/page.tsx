@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Check, LinkIcon, X } from "lucide-react";
+import { Check, LinkIcon, Minus, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Combobox } from "@/components/ui/combobox";
@@ -13,6 +13,14 @@ import DatePicker from "@/components/datePicker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { AppConfig } from "@/lib/appConfig";
 import { toast } from "sonner";
 
@@ -74,6 +82,211 @@ type ReferenceChild = {
   edc: string | null;
 };
 
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function NotificationEmailsCard({
+  mode,
+  emails,
+  adminEmails,
+  newEmail,
+  pendingRemoveEmail,
+  disabled,
+  onNewEmailChange,
+  onAdd,
+  onSelectAdmin,
+  onRemove,
+  onCancelPendingRemove,
+  onClose,
+}: Readonly<{
+  mode: "view" | "manage";
+  emails: string[];
+  adminEmails: string[];
+  newEmail: string;
+  pendingRemoveEmail: string | null;
+  disabled: boolean;
+  onNewEmailChange: (value: string) => void;
+  onAdd: () => void;
+  onSelectAdmin: (email: string) => void;
+  onRemove: (email: string) => void;
+  onCancelPendingRemove: () => void;
+  onClose: () => void;
+}>) {
+  const managing = mode === "manage";
+  const unusedAdmins = adminEmails.filter((email) => !emails.includes(email));
+  const adminItems = unusedAdmins.map((email) => ({
+    label: email,
+    value: email,
+  }));
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notification-emails-card-title"
+        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-xl border border-black/15 bg-background p-5 shadow-lg"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2
+            id="notification-emails-card-title"
+            className="text-sm font-medium"
+          >
+            {managing
+              ? "Add and remove emails"
+              : "Upload notification emails"}
+          </h2>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 px-2"
+            onClick={onClose}
+          >
+            <X className="size-3.5" />
+            Close
+          </Button>
+        </div>
+
+        <ul className="mt-4 divide-y divide-black/10 overflow-y-auto rounded-lg border border-black/10">
+          {emails.length === 0 ? (
+            <li className="px-3 py-3 text-sm text-black/45">
+              No notification emails yet.
+            </li>
+          ) : (
+            emails.map((email) => {
+              const confirming = pendingRemoveEmail === email;
+              return (
+                <li key={email} className="flex items-center gap-2 px-3 py-2.5">
+                  <span className="min-w-0 flex-1 truncate text-sm">
+                    {email}
+                  </span>
+                  {managing ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={confirming ? "destructive" : "outline"}
+                      className="h-8 shrink-0 gap-1 px-2"
+                      disabled={disabled}
+                      onClick={() => onRemove(email)}
+                      onBlur={() => {
+                        if (pendingRemoveEmail === email) {
+                          onCancelPendingRemove();
+                        }
+                      }}
+                    >
+                      {confirming ? (
+                        <>
+                          <Check className="size-3.5" />
+                          Confirm
+                        </>
+                      ) : (
+                        <Minus className="size-3.5" />
+                      )}
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })
+          )}
+        </ul>
+
+        {managing ? (
+          <div className="mt-3 flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="notification-admin-select" className="text-xs">
+                Add from admin emails
+              </Label>
+              <Select
+                items={adminItems}
+                value={null}
+                onValueChange={(next) => {
+                  if (typeof next === "string" && next) onSelectAdmin(next);
+                }}
+                disabled={disabled || adminItems.length === 0}
+              >
+                <SelectTrigger
+                  id="notification-admin-select"
+                  className="w-full min-w-0"
+                >
+                  <SelectValue
+                    placeholder={
+                      adminItems.length === 0
+                        ? "All admin emails are already added"
+                        : "Select an admin email"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent
+                  align="start"
+                  alignItemWithTrigger={false}
+                  className="z-[60]"
+                >
+                  <SelectGroup>
+                    {unusedAdmins.map((email) => (
+                      <SelectItem key={email} value={email}>
+                        {email}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="notification-new-email" className="text-xs">
+                Or type an email
+              </Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="notification-new-email"
+                  type="email"
+                  placeholder="name@company.com"
+                  value={newEmail}
+                  disabled={disabled}
+                  onChange={(event) => onNewEmailChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      onAdd();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      onClose();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-1"
+                  disabled={disabled}
+                  onClick={onAdd}
+                >
+                  <Plus className="size-3.5" />
+                  Add
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-black/45">
+              Click − once, then Confirm to remove. Changes save immediately.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function ConsolePage() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [links, setLinks] = useState<UploadLink[]>([]);
@@ -96,6 +309,13 @@ export default function ConsolePage() {
     string[]
   >([]);
   const [notificationSaving, setNotificationSaving] = useState(false);
+  const [notificationPanel, setNotificationPanel] = useState<
+    "view" | "manage" | null
+  >(null);
+  const [newNotificationEmail, setNewNotificationEmail] = useState("");
+  const [pendingRemoveNotification, setPendingRemoveNotification] = useState<
+    string | null
+  >(null);
 
   const loadStatus = useCallback(() => {
     void fetch("/api/auth/onedrive/status")
@@ -175,6 +395,42 @@ export default function ConsolePage() {
     },
     [uploadNotificationEmails]
   );
+
+  const closeNotificationPanel = () => {
+    setNotificationPanel(null);
+    setNewNotificationEmail("");
+    setPendingRemoveNotification(null);
+  };
+
+  const addNotificationEmail = (raw: string) => {
+    const email = normalizeEmail(raw);
+    if (!email) {
+      toast.error("Enter an email address.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      toast.error("Enter a valid email address.");
+      return;
+    }
+    if (uploadNotificationEmails.includes(email)) {
+      toast.error("That email is already on the list.");
+      return;
+    }
+    setNewNotificationEmail("");
+    setPendingRemoveNotification(null);
+    void saveNotificationEmails([...uploadNotificationEmails, email]);
+  };
+
+  const requestRemoveNotificationEmail = (email: string) => {
+    if (pendingRemoveNotification === email) {
+      setPendingRemoveNotification(null);
+      void saveNotificationEmails(
+        uploadNotificationEmails.filter((entry) => entry !== email)
+      );
+      return;
+    }
+    setPendingRemoveNotification(email);
+  };
 
   const loadChildNames = useCallback(() => {
     setChildNamesLoading(true);
@@ -371,17 +627,6 @@ export default function ConsolePage() {
   }, [loadChildNames, siteUrlInput]);
 
   const connected = Boolean(status?.connected);
-
-  const notificationEmailItems = useMemo(() => {
-    const emails = new Set(allowedAdminEmails);
-    const extras = uploadNotificationEmails.filter(
-      (email) => !emails.has(email)
-    );
-    return [...extras, ...allowedAdminEmails].map((email) => ({
-      label: email,
-      value: email,
-    }));
-  }, [allowedAdminEmails, uploadNotificationEmails]);
 
   useEffect(() => {
     if (!connected) return;
@@ -703,28 +948,37 @@ export default function ConsolePage() {
               )}
             </div>
 
-            <div className="mt-4 flex flex-col gap-1.5">
-              <Label htmlFor="notification-email">
-                Upload notification emails
-              </Label>
-              <Combobox
-                id="notification-email"
-                multiple
-                items={notificationEmailItems}
-                value={uploadNotificationEmails}
-                onValueChange={(emails) => {
-                  void saveNotificationEmails(emails);
-                }}
-                placeholder="Search or select emails"
-                emptyText="No matching emails."
-                disabled={
-                  notificationSaving || notificationEmailItems.length === 0
-                }
-              />
+            <div className="mt-4 flex flex-col gap-2">
+              <Label>Upload notification emails</Label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setPendingRemoveNotification(null);
+                    setNotificationPanel("view");
+                  }}
+                >
+                  View emails
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={notificationSaving}
+                  onClick={() => {
+                    setPendingRemoveNotification(null);
+                    setNewNotificationEmail("");
+                    setNotificationPanel("manage");
+                  }}
+                >
+                  Add and remove emails
+                </Button>
+              </div>
               <p className="text-xs text-black/45">
-                {notificationEmailItems.length === 0
-                  ? "Add allowed admin emails in Settings first."
-                  : "These addresses receive a message when a parent upload succeeds."}
+                These addresses receive a message when a parent upload succeeds.
+                Choose an admin email or type any address.
               </p>
             </div>
 
@@ -838,6 +1092,22 @@ export default function ConsolePage() {
           />
         </div>
       </main>
+      {notificationPanel ? (
+        <NotificationEmailsCard
+          mode={notificationPanel}
+          emails={uploadNotificationEmails}
+          adminEmails={allowedAdminEmails}
+          newEmail={newNotificationEmail}
+          pendingRemoveEmail={pendingRemoveNotification}
+          disabled={notificationSaving}
+          onNewEmailChange={setNewNotificationEmail}
+          onAdd={() => addNotificationEmail(newNotificationEmail)}
+          onSelectAdmin={addNotificationEmail}
+          onRemove={requestRemoveNotificationEmail}
+          onCancelPendingRemove={() => setPendingRemoveNotification(null)}
+          onClose={closeNotificationPanel}
+        />
+      ) : null}
       <Toaster position="bottom-right" richColors closeButton />
     </div>
   );
