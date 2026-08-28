@@ -87,6 +87,68 @@ function headerColumnIndex(headerRow: unknown[], spec: string): number {
   );
 }
 
+function normalizeHeader(value: string): string {
+  return cellText(value)
+    .toLowerCase()
+    .replace(/\(s\)/g, "s")
+    .replace(/[+&/_.,-]+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stemHeader(value: string): string {
+  return normalizeHeader(value)
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.replace(/s$/, ""))
+    .join(" ");
+}
+
+/**
+ * Match source/dest headers even when order differs or labels vary slightly
+ * (e.g. "parent names + phone number" vs "phone number(s)").
+ */
+function headersEquivalent(sourceHeader: string, destHeader: string): boolean {
+  const source = stemHeader(sourceHeader);
+  const dest = stemHeader(destHeader);
+  if (!source || !dest) return false;
+  if (source === dest) return true;
+  const shorter = source.length <= dest.length ? source : dest;
+  const longer = source.length <= dest.length ? dest : source;
+  if (shorter.split(" ").length < 2) return false;
+  return ` ${longer} `.includes(` ${shorter} `);
+}
+
+function mapRowByHeaders(
+  sourceHeaders: unknown[],
+  sourceValues: unknown[],
+  destHeaders: unknown[]
+): unknown[] {
+  const usedSource = new Set<number>();
+  return destHeaders.map((destHeader) => {
+    const destName = cellText(destHeader);
+    if (!destName) return "";
+
+    let match = sourceHeaders.findIndex((header, index) => {
+      return (
+        !usedSource.has(index) &&
+        cellText(header).toLowerCase() === destName.toLowerCase()
+      );
+    });
+    if (match < 0) {
+      match = sourceHeaders.findIndex((header, index) => {
+        return (
+          !usedSource.has(index) && headersEquivalent(cellText(header), destName)
+        );
+      });
+    }
+    if (match < 0) return "";
+    usedSource.add(match);
+    return sourceValues[match] ?? "";
+  });
+}
+
 function todayIsoDate() {
   const now = new Date();
   const year = now.getFullYear();
@@ -425,6 +487,7 @@ export async function moveEditedRowToDoneSheet(
     let sourceSheet: WorksheetRef | undefined;
     let sourceRow = 0;
     let rowValues: unknown[] = [];
+    let sourceHeaders: unknown[] = [];
     let sourceStartCol = 0;
 
     for (const wanted of sourceWanted) {
@@ -441,6 +504,7 @@ export async function moveEditedRowToDoneSheet(
       sourceSheet = sheet;
       sourceRow = found.excelRow;
       rowValues = found.rowValues.map(graphCellValue);
+      sourceHeaders = found.headerRow;
       sourceStartCol = parseA1Start(used.address).col;
       break;
     }
@@ -469,10 +533,8 @@ export async function moveEditedRowToDoneSheet(
     );
     const destStartCol = parseA1Start(destUsed.address).col;
     const destRow = nextClearDataRow(destUsed);
-    const destHeaderCount = (destUsed.values?.[0] ?? []).length;
-    const columnCount = Math.max(rowValues.length, destHeaderCount, 1);
-    const padded = [...rowValues];
-    while (padded.length < columnCount) padded.push("");
+    const destHeaders = destUsed.values?.[0] ?? [];
+    const mapped = mapRowByHeaders(sourceHeaders, rowValues, destHeaders);
 
     await patchRow(
       workbookBase,
@@ -481,7 +543,7 @@ export async function moveEditedRowToDoneSheet(
       doneSheet,
       destRow,
       destStartCol,
-      padded
+      mapped
     );
 
     await deleteOrClearRow(
