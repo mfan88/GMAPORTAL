@@ -31,8 +31,8 @@ function getSenderAddress(): string | null {
 
 /**
  * Notify clinic staff that a parent uploaded a GMA video.
- * Subject includes the child name from the temp portal link; body links only
- * to the same-origin /v/{slug} redirect (never the SharePoint webUrl).
+ * Body links only to the same-origin /v/{slug} redirect (never the SharePoint
+ * webUrl).
  */
 export async function sendUploadNotificationEmail(
   input: UploadNotificationInput
@@ -72,22 +72,21 @@ export async function sendUploadNotificationEmail(
     };
   }
 
-  const safeName = escapeHtml(childName);
   const safeUrl = escapeHtml(fileUrl);
 
-  const subject = `${childName}'s parent has uploaded a new video to your OneDrive`;
+  const subject = `A parent has uploaded a new video to your SharePoint`;
   const plainText = [
-    `Hello,`,
+    `Hello!`,
     ``,
-    `${childName}'s parent has uploaded a new video to your OneDrive.`,
+    `A parent has uploaded a new video to your SharePoint.`,
     ``,
     `Open the video: ${fileUrl}`,
   ].join("\n");
 
   const html = `
-    <p>Hello,</p>
-    <p><strong>${safeName}</strong>'s parent has uploaded a new video to your OneDrive.</p>
-    <p><a href="${safeUrl}">Open the video</a></p>
+    <p>Hello!</p>
+    <p>A parent has uploaded a new video to SharePoint.</p>
+    <p><a href="${safeUrl}">Click here to see the video</a></p>
   `.trim();
 
   const message: EmailMessage = {
