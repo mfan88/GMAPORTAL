@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import {
   getOneDriveAccessToken,
   hasValidAdminAccess,
-  listOneDriveRootFolders,
-  listOneDriveWorkbooks,
+  listSharePointBrowseOptions,
 } from "@/lib/server/index";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +19,8 @@ export async function GET(request: Request) {
 
   try {
     const accessToken = await getOneDriveAccessToken();
-    const [folders, workbooks] = await Promise.all([
-      listOneDriveRootFolders(accessToken),
-      listOneDriveWorkbooks(accessToken),
-    ]);
+    const { folders, workbooks } =
+      await listSharePointBrowseOptions(accessToken);
 
     return NextResponse.json({ folders, workbooks });
   } catch (error) {

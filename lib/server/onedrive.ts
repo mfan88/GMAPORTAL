@@ -22,185 +22,229 @@ export type DriveWorkbookOption = {
 
 const MAX_UPLOAD_FOLDER_OPTIONS = 250;
 const MAX_UPLOAD_FOLDER_DEPTH = 3;
-
-async function listDriveFolderTree(
-  driveId: string,
-  driveName: string,
-  accessToken: string,
-  remaining: number
-): Promise<DriveFolderOption[]> {
-  const folders: DriveFolderOption[] = [];
-  const queue: Array<{ id: string; path: string; depth: number }> = [
-    { id: "root", path: driveName, depth: 0 },
-  ];
-
-  while (queue.length > 0 && folders.length < remaining) {
-    const current = queue.shift();
-    if (!current || current.depth >= MAX_UPLOAD_FOLDER_DEPTH) continue;
-
-    const childrenPath =
-      current.id === "root"
-        ? `${driveBaseFromId(driveId)}/root/children`
-        : `${driveBaseFromId(driveId)}/items/${current.id}/children`;
-
-    let nextUrl: string | undefined =
-      `${childrenPath}?$select=id,name,folder&$top=200`;
-
-    try {
-      while (nextUrl && folders.length < remaining) {
-        const page: {
-          value?: GraphDriveItem[];
-          "@odata.nextLink"?: string;
-        } = await fetchGraphJson(nextUrl, accessToken);
-
-        for (const item of page.value ?? []) {
-          if (!item.folder || typeof item.name !== "string" || !item.id) {
-            continue;
-          }
-          const path = `${current.path}/${item.name}`;
-          folders.push({ id: item.id, name: path });
-          if (
-            current.depth + 1 < MAX_UPLOAD_FOLDER_DEPTH &&
-            folders.length + queue.length < remaining
-          ) {
-            queue.push({ id: item.id, path, depth: current.depth + 1 });
-          }
-          if (folders.length >= remaining) break;
-        }
-
-        nextUrl = page["@odata.nextLink"];
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return folders;
-}
-
-/**
- * Document libraries on the site, plus nested folders as library-relative
- * paths (e.g. "GMA Video/Inbox"). SharePoint libraries are drives, not
- * children of the default Documents library.
- */
-export async function listOneDriveRootFolders(
-  accessToken: string
-): Promise<DriveFolderOption[]> {
-  const drives = await listSiteDrives(accessToken);
-  const options: DriveFolderOption[] = [];
-  const seen = new Set<string>();
-
-  for (const drive of drives) {
-    if (!drive.id || !drive.name || seen.has(drive.name)) continue;
-    seen.add(drive.name);
-    options.push({ id: drive.id, name: drive.name });
-  }
-
-  for (const drive of drives) {
-    if (!drive.id || !drive.name) continue;
-    const remaining = MAX_UPLOAD_FOLDER_OPTIONS - options.length;
-    if (remaining <= 0) break;
-    const nested = await listDriveFolderTree(
-      drive.id,
-      drive.name,
-      accessToken,
-      remaining
-    );
-    for (const folder of nested) {
-      if (seen.has(folder.name)) continue;
-      seen.add(folder.name);
-      options.push(folder);
-    }
-  }
-
-  return options.sort((a, b) => a.name.localeCompare(b.name));
-}
+const MAX_WORKBOOKS = 200;
+const GRAPH_LIST_CONCURRENCY = 8;
+const WORKBOOK_FOLDER_DEPTH = 1;
 
 type GraphChildrenPage = {
   value?: GraphDriveItem[];
   "@odata.nextLink"?: string;
 };
 
-async function listDriveChildrenPage(
-  url: string,
-  accessToken: string
-): Promise<GraphChildrenPage> {
-  return fetchGraphJson<GraphChildrenPage>(url, accessToken);
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index]);
+    }
+  }
+  const workers = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  return results;
 }
 
-/**
- * .xlsx files at each library root and one folder down. Do not walk video
- * libraries deeply — that made child-name loading extremely slow.
- */
-export async function listOneDriveWorkbooks(
+async function listAllChildren(
+  driveId: string,
+  itemId: string,
+  accessToken: string,
+  select: string
+): Promise<GraphDriveItem[]> {
+  const childrenPath =
+    itemId === "root"
+      ? `${driveBaseFromId(driveId)}/root/children`
+      : `${driveBaseFromId(driveId)}/items/${itemId}/children`;
+  let nextUrl: string | undefined =
+    `${childrenPath}?$select=${select}&$top=200`;
+  const items: GraphDriveItem[] = [];
+  while (nextUrl) {
+    const page: GraphChildrenPage = await fetchGraphJson<GraphChildrenPage>(
+      nextUrl,
+      accessToken
+    );
+    items.push(...(page.value ?? []));
+    nextUrl = page["@odata.nextLink"];
+  }
+  return items;
+}
+
+function isXlsxFile(item: GraphDriveItem) {
+  return Boolean(
+    item.file &&
+      typeof item.name === "string" &&
+      item.name.toLowerCase().endsWith(".xlsx")
+  );
+}
+
+async function browseDrive(
+  drive: GraphDrive,
   accessToken: string
-): Promise<DriveWorkbookOption[]> {
-  const MAX_WORKBOOKS = 200;
-  const drives = await listSiteDrives(accessToken);
+): Promise<{
+  folders: DriveFolderOption[];
+  workbooks: DriveWorkbookOption[];
+}> {
+  if (!drive.id || !drive.name) {
+    return { folders: [], workbooks: [] };
+  }
 
-  const seenNames = new Set<string>();
+  const folders: DriveFolderOption[] = [
+    { id: drive.id, name: drive.name },
+  ];
   const workbooks: DriveWorkbookOption[] = [];
+  const driveId = drive.id;
+  const driveName = drive.name;
 
-  for (const drive of drives) {
-    if (!drive.id || workbooks.length >= MAX_WORKBOOKS) break;
+  let rootChildren: GraphDriveItem[];
+  try {
+    rootChildren = await listAllChildren(
+      driveId,
+      "root",
+      accessToken,
+      "id,name,file,folder"
+    );
+  } catch {
+    return { folders, workbooks };
+  }
 
-    const driveBase = driveBaseFromId(drive.id);
-    const folderQueue: Array<{ id: string; depth: number }> = [
-      { id: "root", depth: 0 },
-    ];
-    const visitedFolders = new Set<string>();
-
-    try {
-      while (folderQueue.length > 0 && workbooks.length < MAX_WORKBOOKS) {
-        const current = folderQueue.shift();
-        if (!current || visitedFolders.has(current.id)) continue;
-        visitedFolders.add(current.id);
-
-        const childrenPath =
-          current.id === "root"
-            ? `${driveBase}/root/children`
-            : `${driveBase}/items/${current.id}/children`;
-
-        let nextUrl: string | undefined =
-          `${childrenPath}?$select=id,name,file,folder&$top=200`;
-
-        while (nextUrl && workbooks.length < MAX_WORKBOOKS) {
-          const page = await listDriveChildrenPage(nextUrl, accessToken);
-
-          for (const item of page.value ?? []) {
-            if (typeof item.id !== "string" || typeof item.name !== "string") {
-              continue;
-            }
-
-            if (item.folder) {
-              if (current.depth === 0 && !visitedFolders.has(item.id)) {
-                folderQueue.push({ id: item.id, depth: 1 });
-              }
-              continue;
-            }
-
-            if (!item.file) continue;
-            if (!item.name.toLowerCase().endsWith(".xlsx")) continue;
-            if (seenNames.has(item.name)) continue;
-
-            seenNames.add(item.name);
-            workbooks.push({
-              id: item.id,
-              name: item.name,
-              driveId: drive.id,
-            });
-            if (workbooks.length >= MAX_WORKBOOKS) break;
-          }
-
-          nextUrl = page["@odata.nextLink"];
-        }
-      }
-    } catch {
+  const depth1Folders: Array<{ id: string; path: string }> = [];
+  for (const item of rootChildren) {
+    if (typeof item.id !== "string" || typeof item.name !== "string") continue;
+    if (item.folder) {
+      const path = `${driveName}/${item.name}`;
+      folders.push({ id: item.id, name: path });
+      depth1Folders.push({ id: item.id, path });
       continue;
+    }
+    if (isXlsxFile(item)) {
+      workbooks.push({ id: item.id, name: item.name, driveId });
     }
   }
 
-  return workbooks.sort((a, b) => a.name.localeCompare(b.name));
+  const depth1Children = await mapPool(
+    depth1Folders,
+    GRAPH_LIST_CONCURRENCY,
+    async (folder) => {
+      try {
+        return await listAllChildren(
+          driveId,
+          folder.id,
+          accessToken,
+          "id,name,file,folder"
+        );
+      } catch {
+        return [] as GraphDriveItem[];
+      }
+    }
+  );
+
+  const depth2Folders: Array<{ id: string; path: string }> = [];
+  depth1Children.forEach((items, index) => {
+    const parent = depth1Folders[index];
+    if (!parent) return;
+    for (const item of items) {
+      if (typeof item.id !== "string" || typeof item.name !== "string") continue;
+      if (item.folder) {
+        const path = `${parent.path}/${item.name}`;
+        folders.push({ id: item.id, name: path });
+        if (MAX_UPLOAD_FOLDER_DEPTH > 2) {
+          depth2Folders.push({ id: item.id, path });
+        }
+        continue;
+      }
+      if (WORKBOOK_FOLDER_DEPTH >= 1 && isXlsxFile(item)) {
+        workbooks.push({ id: item.id, name: item.name, driveId });
+      }
+    }
+  });
+
+  if (MAX_UPLOAD_FOLDER_DEPTH > 2) {
+    const depth2Children = await mapPool(
+      depth2Folders,
+      GRAPH_LIST_CONCURRENCY,
+      async (folder) => {
+        try {
+          return await listAllChildren(
+            driveId,
+            folder.id,
+            accessToken,
+            "id,name,folder"
+          );
+        } catch {
+          return [] as GraphDriveItem[];
+        }
+      }
+    );
+    depth2Children.forEach((items, index) => {
+      const parent = depth2Folders[index];
+      if (!parent) return;
+      for (const item of items) {
+        if (!item.folder || typeof item.id !== "string" || typeof item.name !== "string") {
+          continue;
+        }
+        folders.push({ id: item.id, name: `${parent.path}/${item.name}` });
+      }
+    });
+  }
+
+  return { folders, workbooks };
+}
+
+/**
+ * Live SharePoint folder paths and .xlsx files for Settings dropdowns.
+ * One walk per library (folders to depth 3, workbooks at root + one folder).
+ */
+export async function listSharePointBrowseOptions(accessToken: string): Promise<{
+  folders: DriveFolderOption[];
+  workbooks: DriveWorkbookOption[];
+}> {
+  const drives = await listSiteDrives(accessToken);
+  const perDrive = await Promise.all(
+    drives.map((drive) => browseDrive(drive, accessToken))
+  );
+
+  const folders: DriveFolderOption[] = [];
+  const workbooks: DriveWorkbookOption[] = [];
+  const seenFolders = new Set<string>();
+  const seenWorkbooks = new Set<string>();
+
+  for (const result of perDrive) {
+    for (const folder of result.folders) {
+      if (seenFolders.has(folder.name)) continue;
+      seenFolders.add(folder.name);
+      folders.push(folder);
+    }
+    for (const workbook of result.workbooks) {
+      if (seenWorkbooks.has(workbook.name)) continue;
+      seenWorkbooks.add(workbook.name);
+      workbooks.push(workbook);
+    }
+  }
+
+  folders.sort((a, b) => a.name.localeCompare(b.name));
+  workbooks.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    folders: folders.slice(0, MAX_UPLOAD_FOLDER_OPTIONS),
+    workbooks: workbooks.slice(0, MAX_WORKBOOKS),
+  };
+}
+
+export async function listOneDriveRootFolders(
+  accessToken: string
+): Promise<DriveFolderOption[]> {
+  return (await listSharePointBrowseOptions(accessToken)).folders;
+}
+
+export async function listOneDriveWorkbooks(
+  accessToken: string
+): Promise<DriveWorkbookOption[]> {
+  return (await listSharePointBrowseOptions(accessToken)).workbooks;
 }
 
 export async function findOneDriveWorkbookByName(
@@ -234,26 +278,41 @@ export async function findOneDriveWorkbookByName(
     return paths;
   };
 
-  for (const drive of ordered) {
-    if (!drive.id) continue;
-    for (const path of pathsForDrive(drive)) {
-      try {
-        const item = await getDriveItemByPath(drive.id, path, accessToken);
-        if (
-          item?.id &&
-          item.file &&
-          typeof item.name === "string" &&
-          item.name.toLowerCase().endsWith(".xlsx")
-        ) {
-          return { id: item.id, name: item.name, driveId: drive.id };
+  const lookups = ordered.flatMap((drive, driveIndex) => {
+    if (!drive.id) return [];
+    const driveId = drive.id;
+    const rankBase = preferred(drive) * 1000 + driveIndex * 10;
+    return pathsForDrive(drive).map((path, pathIndex) =>
+      (async (): Promise<{
+        rank: number;
+        option: DriveWorkbookOption;
+      } | null> => {
+        try {
+          const item = await getDriveItemByPath(driveId, path, accessToken);
+          if (
+            item?.id &&
+            item.file &&
+            typeof item.name === "string" &&
+            item.name.toLowerCase().endsWith(".xlsx")
+          ) {
+            return {
+              rank: rankBase + pathIndex,
+              option: { id: item.id, name: item.name, driveId },
+            };
+          }
+        } catch {
+          return null;
         }
-      } catch {
-        continue;
-      }
-    }
-  }
+        return null;
+      })()
+    );
+  });
 
-  return null;
+  const hits = (await Promise.all(lookups)).filter(
+    (hit): hit is { rank: number; option: DriveWorkbookOption } => hit != null
+  );
+  hits.sort((a, b) => a.rank - b.rank);
+  return hits[0]?.option ?? null;
 }
 
 async function loadWorkbookSheet(

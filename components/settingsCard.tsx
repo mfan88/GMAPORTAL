@@ -410,6 +410,7 @@ export default function SettingsCard({
 }>) {
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [browseLoading, setBrowseLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [folders, setFolders] = useState<DriveOption[]>([]);
   const [workbooks, setWorkbooks] = useState<DriveOption[]>([]);
@@ -435,6 +436,7 @@ export default function SettingsCard({
       return;
     }
 
+    setBrowseLoading(true);
     try {
       const browseRes = await fetch("/api/onedrive/browse");
       const browse = (await browseRes.json()) as {
@@ -454,6 +456,8 @@ export default function SettingsCard({
           ? error.message
           : "Could not load SharePoint items";
       notify({ type: "error", message });
+    } finally {
+      setBrowseLoading(false);
     }
   }, [connected, notify]);
 
@@ -468,7 +472,6 @@ export default function SettingsCard({
       const nextForm = configToForm(config);
       setForm(nextForm);
       setSaved(nextForm);
-      await loadBrowse();
     } catch (error) {
       if (isBenignFetchInterruption(error)) return;
       const message =
@@ -477,7 +480,7 @@ export default function SettingsCard({
     } finally {
       setLoading(false);
     }
-  }, [loadBrowse, notify]);
+  }, [notify]);
 
   useEffect(() => {
     let cancelled = false;
@@ -498,12 +501,14 @@ export default function SettingsCard({
   const worksheetName = form?.referenceWorksheetName.trim() ?? "";
 
   useEffect(() => {
-    if (!connected || !workbookName) {
-      columnsSourceRef.current = null;
-      setWorksheets([]);
-      setColumns([]);
-      setColumnsError(null);
-      setColumnsLoading(false);
+    if (!connected || !editing || !workbookName) {
+      if (!editing) {
+        columnsSourceRef.current = null;
+        setWorksheets([]);
+        setColumns([]);
+        setColumnsError(null);
+        setColumnsLoading(false);
+      }
       return;
     }
 
@@ -606,7 +611,7 @@ export default function SettingsCard({
     })();
 
     return () => controller.abort();
-  }, [connected, workbookName, worksheetName]);
+  }, [connected, editing, workbookName, worksheetName]);
 
   const folderItems = useMemo(() => {
     const names = new Set(folders.map((folder) => folder.name));
@@ -822,6 +827,10 @@ export default function SettingsCard({
             variant="outline"
             disabled={!connected || loading || !form}
             onClick={() => {
+              columnsSourceRef.current = null;
+              setColumns([]);
+              setWorksheets([]);
+              setColumnsError(null);
               setEditing(true);
               closeEmailPanel();
               void loadBrowse();
@@ -866,9 +875,13 @@ export default function SettingsCard({
                   prev ? { ...prev, folderName: value } : prev
                 );
               }}
-              placeholder="Search libraries and folders"
+              placeholder={
+                browseLoading
+                  ? "Loading folders…"
+                  : "Search libraries and folders"
+              }
               emptyText="No matching folders."
-              disabled={!editing}
+              disabled={!editing || browseLoading}
             />
             <p className="text-xs text-[#02182B]/45">
               Libraries and nested folders, shown as a path (for example GMA
@@ -894,10 +907,14 @@ export default function SettingsCard({
                   };
                 });
               }}
-              disabled={!editing}
+              disabled={!editing || browseLoading}
             >
               <SelectTrigger id="settings-workbook" className="w-full">
-                <SelectValue placeholder="Select an .xlsx file" />
+                <SelectValue
+                  placeholder={
+                    browseLoading ? "Loading workbooks…" : "Select an .xlsx file"
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -909,9 +926,6 @@ export default function SettingsCard({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <p className="text-xs text-[#02182B]/45">
-              Excel (.xlsx) files found in the SharePoint site.
-            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
