@@ -116,7 +116,8 @@ export default function GenerateALinkPage() {
           </li>
           <li>
             Use the <strong>X</strong> on a link row in Active Links when you no
-            longer need that entry listed.
+            longer need that entry listed. Used and expired rows also leave the
+            list on their own after one day.
           </li>
         </ul>
       </DocArticle>

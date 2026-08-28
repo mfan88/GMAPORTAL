@@ -1007,6 +1007,10 @@ export default function ConsolePage() {
                 </span>
               </span>
             </div>
+            <p className="mt-1 text-xs text-[#02182B]/45">
+              Used and expired links leave this list after one day, or sooner if
+              you remove them.
+            </p>
 
             <div className="mt-3 max-h-64 min-h-0 overflow-y-auto overscroll-contain pr-1 sm:max-h-80 lg:max-h-none lg:flex-1">
               {links.length === 0 ? (

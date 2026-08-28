@@ -3,13 +3,16 @@ import { randomUUID } from "node:crypto";
 import { getAppConfig } from "./configHelper";
 
 const LINK_PREFIX = "link:";
+/** How long a used or expired link stays in the console before Redis drops it. */
+const CONSOLE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Link lifecycle in the admin console:
  * - "scheduled": letter date not reached yet (portal shows expired/not found).
  * - "provisioning": buffer window after the letter date (not usable yet).
  * - "pending": active and waiting for a parent to upload.
- * - "used": consumed by a successful upload; kept until admin dismisses it.
+ * - "used": consumed by a successful upload, or past expiresAt; listed for
+ *   one day unless an admin deletes it sooner.
  */
 export type LinkState = "scheduled" | "provisioning" | "pending" | "used";
 
@@ -62,6 +65,35 @@ export function getRedis() {
   return redisClient;
 }
 
+function resolveExpiresAt(
+  value: StoredLink,
+  bufferTimeMs: number,
+  linkExpiryTimeMs: number
+): number {
+  if (typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)) {
+    return value.expiresAt;
+  }
+  return resolveBufferStartsAt(value) + bufferTimeMs + linkExpiryTimeMs;
+}
+
+/** Console (and Redis) drop the row one day after use, or one day after expiry if unused. */
+function consoleHideAt(
+  value: StoredLink,
+  bufferTimeMs: number,
+  linkExpiryTimeMs: number
+): number {
+  const expiresAt = resolveExpiresAt(value, bufferTimeMs, linkExpiryTimeMs);
+  const endedAt =
+    typeof value.usedAt === "number" && Number.isFinite(value.usedAt)
+      ? value.usedAt
+      : expiresAt;
+  return endedAt + CONSOLE_RETENTION_MS;
+}
+
+function retentionTtlSeconds(hideAt: number, now = Date.now()): number {
+  return Math.max(1, Math.ceil((hideAt - now) / 1000));
+}
+
 function resolveBufferStartsAt(value: StoredLink): number {
   if (
     typeof value.bufferStartsAt === "number" &&
@@ -91,10 +123,7 @@ function deriveState(
 
   const bufferStartsAt = resolveBufferStartsAt(value);
   const availableAt = bufferStartsAt + bufferTimeMs;
-  const expiresAt =
-    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
-      ? value.expiresAt
-      : availableAt + linkExpiryTimeMs;
+  const expiresAt = resolveExpiresAt(value, bufferTimeMs, linkExpiryTimeMs);
   const now = Date.now();
 
   if (now >= expiresAt) return "used";
@@ -126,10 +155,7 @@ function toUploadLink(
 ): UploadLink {
   const bufferStartsAt = resolveBufferStartsAt(value);
   const availableAt = bufferStartsAt + bufferTimeMs;
-  const expiresAt =
-    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
-      ? value.expiresAt
-      : availableAt + linkExpiryTimeMs;
+  const expiresAt = resolveExpiresAt(value, bufferTimeMs, linkExpiryTimeMs);
 
   return {
     token,
@@ -189,7 +215,8 @@ export async function createUploadLink(input: {
     ...(scheduledDate ? { scheduledDate } : {}),
   };
 
-  const ttlSeconds = Math.max(60, Math.ceil((expiresAt - Date.now()) / 1000));
+  const hideAt = expiresAt + CONSOLE_RETENTION_MS;
+  const ttlSeconds = Math.max(60, retentionTtlSeconds(hideAt));
 
   await getRedis().set(`${LINK_PREFIX}${token}`, value, {
     ex: ttlSeconds,
@@ -226,13 +253,34 @@ export async function listLinks(): Promise<UploadLink[]> {
     ...tokens.map((token) => `${LINK_PREFIX}${token}`)
   );
 
+  const now = Date.now();
   const links: UploadLink[] = [];
+  const staleKeys: string[] = [];
+
   tokens.forEach((token, index) => {
     const value = values[index];
-    if (value && typeof value.createdAt === "number") {
-      links.push(toUploadLink(token, value, bufferTimeMs, linkExpiryTimeMs));
+    if (!value || typeof value.createdAt !== "number") return;
+    const key = `${LINK_PREFIX}${token}`;
+    const hideAt = consoleHideAt(value, bufferTimeMs, linkExpiryTimeMs);
+    if (now >= hideAt) {
+      staleKeys.push(key);
+      return;
     }
+    links.push(toUploadLink(token, value, bufferTimeMs, linkExpiryTimeMs));
   });
+
+  if (staleKeys.length > 0) {
+    await redis.del(...staleKeys);
+  }
+
+  await Promise.all(
+    links.map((link) =>
+      redis.expire(
+        `${LINK_PREFIX}${link.token}`,
+        retentionTtlSeconds((link.usedAt ?? link.expiresAt) + CONSOLE_RETENTION_MS)
+      )
+    )
+  );
 
   return links.sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -259,10 +307,7 @@ export async function checkUploadLink(token: string): Promise<LinkStatus> {
   const { bufferTimeMs, linkExpiryTimeMs } = await getAppConfig();
   const bufferStartsAt = resolveBufferStartsAt(value);
   const availableAt = bufferStartsAt + bufferTimeMs;
-  const expiresAt =
-    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
-      ? value.expiresAt
-      : availableAt + linkExpiryTimeMs;
+  const expiresAt = resolveExpiresAt(value, bufferTimeMs, linkExpiryTimeMs);
   const now = Date.now();
 
   // Before the scheduled letter date: same as not found / expired (no countdown).
@@ -301,10 +346,7 @@ export async function uploadLinkUsable(token: string): Promise<boolean> {
   const { bufferTimeMs, linkExpiryTimeMs } = await getAppConfig();
   const bufferStartsAt = resolveBufferStartsAt(value);
   const availableAt = bufferStartsAt + bufferTimeMs;
-  const expiresAt =
-    typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
-      ? value.expiresAt
-      : availableAt + linkExpiryTimeMs;
+  const expiresAt = resolveExpiresAt(value, bufferTimeMs, linkExpiryTimeMs);
   const now = Date.now();
   return now >= availableAt && now < expiresAt;
 }
@@ -322,10 +364,12 @@ export async function consumeUploadLink(token: string): Promise<boolean> {
     return false;
   }
 
+  const usedAt = Date.now();
   const updated: StoredLink = {
     ...value,
-    usedAt: Date.now(),
+    usedAt,
   };
-  await redis.set(key, updated);
+  const hideAt = usedAt + CONSOLE_RETENTION_MS;
+  await redis.set(key, updated, { ex: retentionTtlSeconds(hideAt, usedAt) });
   return true;
 }

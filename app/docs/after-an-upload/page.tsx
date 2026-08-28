@@ -21,8 +21,9 @@ export default function AfterAnUploadPage() {
             configured upload folder in OneDrive.
           </li>
           <li>
-            In the admin console, dismiss the used link when you no longer need
-            it listed.
+            In the admin console, the used link stays in Active Links for one
+            day, then drops off on its own. You can still remove it sooner with
+            the X.
           </li>
         </ol>
 
