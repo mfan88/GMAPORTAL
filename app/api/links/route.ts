@@ -6,6 +6,7 @@ import {
   removeUploadLink,
   toRequestShape,
 } from "@/lib/server/index";
+import { parentLinkPath } from "@/lib/parentLink";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
         bufferStartsAt: link.bufferStartsAt,
         availableAt: link.availableAt,
         expiresAt: link.expiresAt,
-        url: `${origin}/portalaccess/${link.token}`,
+        url: `${origin}${parentLinkPath(link.token)}`,
       })),
     });
   } catch (error) {

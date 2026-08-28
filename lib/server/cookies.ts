@@ -166,7 +166,7 @@ export function clearAdminAccessCookieHeader() {
 }
 
 /**
- * Microsoft end-session URL so the next /setup login can pick another account.
+ * Microsoft end-session URL so the next /console login can pick another account.
  */
 export function getMicrosoftLogoutUrl(postLogoutRedirectUri: string) {
   const authority = azureTenantId

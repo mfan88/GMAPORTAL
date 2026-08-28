@@ -10,6 +10,7 @@ export * from "./fileRedirect";
 export * from "./msalHelpers";
 export * from "./onedrive";
 export * from "./pkce";
+export * from "./portalLink";
 export * from "./redis";
 export * from "./shape";
 export * from "./uploadHelpers";

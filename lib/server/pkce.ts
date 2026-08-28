@@ -9,6 +9,7 @@ export function createPkcePair() {
 
 export const PKCE_COOKIE_NAME = "onedrive_pkce";
 export const AUTH_FLOW_COOKIE_NAME = "onedrive_auth_flow";
+export const ADMIN_NEXT_COOKIE_NAME = "admin_next";
 
 export type OneDriveAuthFlow =
   "setup" | "upload-access" | "admin" | "site-grant";
@@ -35,6 +36,58 @@ export function authFlowCookieHeader(flow: OneDriveAuthFlow) {
 
 export function clearAuthFlowCookieHeader() {
   return clearCookie(AUTH_FLOW_COOKIE_NAME);
+}
+
+/** Allowlisted post-login path for admin OAuth (docs or console). */
+export function safeAdminNextPath(value: string | null | undefined): string {
+  if (!value) return "/console";
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return "/console";
+  }
+  if (decoded.startsWith("//") || decoded.includes("://") || decoded.includes("\\")) {
+    return "/console";
+  }
+  if (decoded === "/docs" || decoded.startsWith("/docs/")) {
+    return decoded;
+  }
+  if (decoded === "/console" || decoded.startsWith("/console?")) {
+    return decoded;
+  }
+  if (decoded === "/setup" || decoded.startsWith("/setup?")) {
+    return decoded.replace(/^\/setup/, "/console");
+  }
+  return "/console";
+}
+
+export function adminNextCookieHeader(path: string) {
+  return buildCookie(
+    ADMIN_NEXT_COOKIE_NAME,
+    encodeURIComponent(safeAdminNextPath(path)),
+    600
+  );
+}
+
+export function clearAdminNextCookieHeader() {
+  return clearCookie(ADMIN_NEXT_COOKIE_NAME);
+}
+
+export function getAdminNextCookie(req: {
+  headers: { cookie?: string };
+}): string | null {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name === ADMIN_NEXT_COOKIE_NAME) {
+      return decodeURIComponent(rest.join("="));
+    }
+  }
+
+  return null;
 }
 
 export function setPkceCookie(

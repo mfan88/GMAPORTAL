@@ -16,8 +16,8 @@ The product has two primary surfaces:
 
 | Surface              | URL                                       | Users                          |
 | -------------------- | ----------------------------------------- | ------------------------------ |
-| Parent upload portal | `/` (entered via `/portalaccess/{token}`) | Parents / caregivers           |
-| Admin console        | `/setup`                                  | Allowlisted Microsoft accounts |
+| Parent upload portal | `/link` (entered via `/link/{token}`) | Parents / caregivers           |
+| Admin console        | `/console`                                  | Allowlisted Microsoft accounts |
 | Public info          | `/info`, `/privacy`, `/tos`               | Anyone                         |
 
 **Technology stack**
@@ -42,7 +42,7 @@ The product has two primary surfaces:
    - Redirect URI: `{APP_URL}/api/auth/upload-access/callback`
 3. Set `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`, and `NEXT_PUBLIC_AZURE_CLIENT_ID`.
 4. Seed at least one admin email via `ALLOWED_ADMIN_EMAILS` and/or Settings → Allowed admin emails.
-5. Open `/setup` and sign in with an allowlisted **work** account.
+5. Open `/console` and sign in with an allowlisted **work** account.
 6. Paste the SharePoint **site URL** and connect (Sites.Selected).
 7. In Settings, set upload folder, reference workbook, columns, link timings, and admin allowlist.
 8. Confirm the reference workbook exists in that site drive and the child list loads.
@@ -51,9 +51,9 @@ Personal Microsoft accounts are **not** supported as the upload destination in t
 
 ### 2.2 Generating a parent link
 
-1. In `/setup`, pick a child from the reference sheet (or enter name + EDC as supported by the UI).
+1. In `/console`, pick a child from the reference sheet (or enter name + EDC as supported by the UI).
 2. Generate a link. The app stores child name + EDC on the Redis link record.
-3. Copy the full URL (`{origin}/portalaccess/{token}`) and send it to the parent through your normal clinic channel.
+3. Copy the full URL (`{origin}/link/{token}`) and send it to the parent through your normal clinic channel.
 4. Links start in a short **provisioning** (buffer) period, then become usable until they expire or are used once.
 
 ### 2.3 Parent upload flow
@@ -69,7 +69,7 @@ Personal Microsoft accounts are **not** supported as the upload destination in t
 
 - Check email for subject: `{ChildName}'s parent has uploaded a new video to your OneDrive`.
 - Open the OneDrive link in the message, or browse the configured folder.
-- In `/setup`, dismiss used links when no longer needed.
+- In `/console`, dismiss used links when no longer needed.
 
 ### 2.5 Changing the receiving OneDrive
 
@@ -81,7 +81,7 @@ Use **Change receiving OneDrive** in the admin console. Only allowlisted account
 
 ```
 ┌─────────────┐     portal link      ┌──────────────────┐
-│   Parent    │ ───────────────────► │ /portalaccess/…  │
+│   Parent    │ ───────────────────► │ /link/{token}     │
 └─────────────┘                      └────────┬─────────┘
                                               │ sets upload_access cookie
                                               ▼
@@ -92,8 +92,8 @@ Use **Change receiving OneDrive** in the admin console. Only allowlisted account
                                               │ Graph upload
                                               ▼
 ┌─────────────┐   admin OAuth        ┌──────────────────┐
-│   Admin     │ ───────────────────► │ /setup + Redis   │
-│  (/setup)   │                      │ config + links   │
+│   Admin     │ ───────────────────► │ /console + Redis   │
+│  (/console)   │                      │ config + links   │
 └─────────────┘                      └────────┬─────────┘
                                               │
                      ┌────────────────────────┼────────────────────────┐
@@ -126,7 +126,7 @@ Use **Change receiving OneDrive** in the admin console. Only allowlisted account
 | **pending**      | Buffer elapsed; waiting for a successful upload.                                 |
 | **used**         | `usedAt` set after `/api/upload/complete`.                                       |
 
-### 4.3 Parent-facing checks (`/portalaccess/[token]`)
+### 4.3 Parent-facing checks (`/link/[token]`)
 
 | Result                   | Behavior                                         |
 | ------------------------ | ------------------------------------------------ |
@@ -275,7 +275,7 @@ Implemented in `lib/upload.ts` and triggered from `components/uploadArea.tsx`.
 
 ### 5.6 Non-API route handler
 
-#### `GET /portalaccess/[token]`
+#### `GET /link/[token]`
 
 Activates a parent session when the link is usable (see §4.3). Sets the signed portal cookie and redirects to `/`.
 
@@ -307,7 +307,7 @@ Cookie HMAC secret resolution: `UPLOAD_ACCESS_SECRET` → else `UPSTASH_REDIS_RE
 
 ### 6.4 Admin console gate
 
-`app/setup/layout.tsx` requires `hasValidAdminAccess`. Unauthenticated users are sent through `/api/auth/admin/login`.
+`app/console/layout.tsx` requires `hasValidAdminAccess`. Unauthenticated users are sent through `/api/auth/admin/login`.
 
 ---
 
@@ -326,7 +326,7 @@ Defaults live in `lib/appConfig.ts`. Overrides persist in Redis via Settings / `
 | `fileDetails.uploadChunkSizeBytes`   | 10 MB                | Resumable chunk size                         |
 | `referenceSheetName`                 | `REFERENCE.xlsx`     | Workbook for child picker                    |
 | `childNameColumn` / `edcColumn`      | `Child Name` / `EDC` | Excel headers (or letters)                   |
-| `allowedAdminEmails`                 | (defaults + env)     | Who may use `/setup` and own the drive       |
+| `allowedAdminEmails`                 | (defaults + env)     | Who may use `/console` and own the drive       |
 
 Accepted upload types default to `video/*` (client also accepts empty MIME + common video extensions for iOS).
 
@@ -344,7 +344,7 @@ Accepted upload types default to `video/*` (client also accepts empty MIME + com
 | `UPSTASH_REDIS_REST_TOKEN`                       | Yes                 | Redis token (also may sign cookies)                           |
 | `UPLOAD_ACCESS_SECRET`                           | Recommended in prod | Dedicated cookie signing secret                               |
 | `ALLOWED_ADMIN_EMAILS`                           | Recommended         | Comma/newline list of admin emails                            |
-| `SHAREPOINT_SITE_ID` / `SHAREPOINT_SITE_URL`     | Optional            | Pre-seed site; otherwise connect in `/setup`                  |
+| `SHAREPOINT_SITE_ID` / `SHAREPOINT_SITE_URL`     | Optional            | Pre-seed site; otherwise connect in `/console`                  |
 | `AZURE_AUTHORITY`                                | Optional            | Default tenant or `/organizations`                            |
 | `ONEDRIVE_REDIRECT_URI`                          | Optional            | Narrow registered redirect URI                                |
 | `BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_ID`        | Vercel              | Optional legacy token-cache storage                           |
@@ -392,11 +392,11 @@ Useful scripts: `npm run build`, `npm start`, `npm run lint`, `npm run typecheck
 2. Configure Vercel Blob (or equivalent) so OneDrive tokens survive serverless instances.
 3. Register production redirect URIs in Entra.
 4. Connect ACS email domain + set sender address.
-5. Sign in at `/setup`, connect OneDrive, verify Settings and a test link.
+5. Sign in at `/console`, connect OneDrive, verify Settings and a test link.
 
 ### 10.3 Smoke-test checklist
 
-- [ ] Admin can sign in at `/setup`
+- [ ] Admin can sign in at `/console`
 - [ ] Receiving OneDrive shows connected
 - [ ] Child names load from Excel
 - [ ] Generate link → open on phone Safari → upload small video
@@ -421,7 +421,7 @@ Useful scripts: `npm run build`, `npm start`, `npm run lint`, `npm run typecheck
 | `app/page.tsx`                         | Parent UI (desktop + mobile layouts)                                            |
 | `components/uploadArea.tsx`            | File picker / upload controls                                                   |
 | `components/settingsCard.tsx`          | Admin settings form                                                             |
-| `app/setup/page.tsx`                   | Admin console                                                                   |
+| `app/console/page.tsx`                   | Admin console                                                                   |
 | `AGENTS.md`                            | Next.js 16 note: read `node_modules/next/dist/docs/` before framework changes   |
 
 ### 11.2 Conventions

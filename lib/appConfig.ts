@@ -23,7 +23,7 @@ export type AppConfig = {
   /** Column header (or letter) with the EDC date. */
   edcColumn: string;
   /**
-   * Microsoft account emails allowed to open /setup and manage the console.
+   * Microsoft account emails allowed to open /console and manage the console.
    * Compared case-insensitively. Can also be seeded via ALLOWED_ADMIN_EMAILS.
    */
   allowedAdminEmails: string[];

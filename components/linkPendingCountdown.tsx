@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { parentLinkPath, PARENT_UPLOAD_PATH } from "@/lib/parentLink";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -83,9 +84,7 @@ export default function LinkPendingCountdown({
 
   useEffect(() => {
     if (!isReady) return;
-    const destination = token
-      ? `/portalaccess/${encodeURIComponent(token)}`
-      : "/";
+    const destination = token ? parentLinkPath(token) : PARENT_UPLOAD_PATH;
     const timeout = window.setTimeout(() => {
       router.replace(destination);
     }, 400);

@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { usePathname } from "next/navigation";
+import { PARENT_UPLOAD_PATH } from "@/lib/parentLink";
 import type { OneDriveUploadResult } from "@/lib/appConfig";
 
 export interface UploadFile {
@@ -74,10 +75,10 @@ export function FileProvider({ children }: { children: ReactNode }) {
   const hasFileSelected = files !== null;
 
   // Refetch whenever the upload page is shown. Root layout keeps this provider
-  // mounted across /link-expired → /portalaccess → /, so a mount-only fetch
+  // mounted across /link-expired → /link/{token} → /link, so a mount-only fetch
   // would miss the portal cookie set after the countdown.
   useEffect(() => {
-    if (pathname !== "/") {
+    if (pathname !== PARENT_UPLOAD_PATH) {
       return;
     }
 

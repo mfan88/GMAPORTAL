@@ -59,7 +59,7 @@ export default function UploadAccessDeniedPage() {
               "Use a valid parent upload link or sign in as an allowlisted admin."}
           </AlertDescription>
         </Alert>
-        <Link href="/setup" className="text-sm underline">
+        <Link href="/console" className="text-sm underline">
           Clinic admin? Go to the console
         </Link>
       </main>

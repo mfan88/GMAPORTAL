@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Legacy "connect OneDrive user" route. Destination is now a SharePoint site
- * configured at /setup via Sites.Selected app-only access.
+ * configured at /console via Sites.Selected app-only access.
  */
 export async function GET(request: NextRequest) {
   if (
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.redirect(
-    publicUrl("/setup?error=use_sharepoint_connect", request),
+    publicUrl("/console?error=use_sharepoint_connect", request),
     { status: 307 }
   );
 }

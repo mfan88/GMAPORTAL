@@ -10,6 +10,7 @@ import {
   toRequestShape,
   hasValidAdminAccess,
 } from "@/lib/server/index";
+import { parentLinkPath } from "@/lib/parentLink";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
       getAppConfig(),
     ]);
     const origin = getPublicSiteOrigin(toRequestShape(request));
-    const url = `${origin}/portalaccess/${token}`;
+    const url = `${origin}${parentLinkPath(token)}`;
     const response = NextResponse.json({
       token,
       url,

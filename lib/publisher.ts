@@ -2,7 +2,7 @@
 export const PUBLISHER_NAME =
   "Marcus Fan in collaboration with the Developmental Disabilities Association";
 
-export const PUBLISHER_CONTACT_EMAIL = "support@marcusfan.dev";
+export const PUBLISHER_CONTACT_EMAIL = "support@fenna.tech";
 
 export const APP_DISPLAY_NAME =
   "General Movements Assessment (GMA) Video Upload Portal";

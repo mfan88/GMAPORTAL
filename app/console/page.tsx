@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Check, LinkIcon, Minus, Plus, X } from "lucide-react";
+import { Check, CircleHelp, LinkIcon, Minus, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Combobox } from "@/components/ui/combobox";
@@ -13,6 +13,7 @@ import DatePicker from "@/components/datePicker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { parentLinkPath } from "@/lib/parentLink";
 import {
   Select,
   SelectContent,
@@ -517,7 +518,7 @@ export default function ConsolePage() {
   }, [loadStatus, loadLinks, loadConfig]);
 
   const portalLinkUrl = useCallback((token: string) => {
-    return `${window.location.origin}/portalaccess/${encodeURIComponent(token)}`;
+    return `${window.location.origin}${parentLinkPath(token)}`;
   }, []);
 
   const copyLink = useCallback(
@@ -836,19 +837,30 @@ export default function ConsolePage() {
             href="/"
             className="w-fit text-xs underline underline-offset-4 sm:text-sm"
           >
-            {"<<<"} Back to upload portal
+            {"<<<"} Back to home
           </Link>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          onClick={() => {
-            window.location.assign("/api/auth/admin/logout");
-          }}
-        >
-          Sign out
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open documentation"
+            aria-label="Open documentation"
+            className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-background text-black shadow-xs hover:bg-muted"
+          >
+            <CircleHelp className="size-4" aria-hidden />
+          </a>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              window.location.assign("/api/auth/admin/logout");
+            }}
+          >
+            Sign out
+          </Button>
+        </div>
       </header>
 
       <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-3 pb-6 sm:px-6 lg:min-h-0 lg:overflow-hidden lg:pb-4">

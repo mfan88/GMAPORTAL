@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   const siteId = await getConfiguredSharePointSiteId();
   if (!siteId) {
     return NextResponse.redirect(
-      publicUrl("/setup?error=site_not_connected", request),
+      publicUrl("/console?error=site_not_connected", request),
       { status: 307 }
     );
   }
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     const message =
       error instanceof Error ? error.message : "Could not start site grant";
     return NextResponse.redirect(
-      publicUrl(`/setup?error=${encodeURIComponent(message)}`, request),
+      publicUrl(`/console?error=${encodeURIComponent(message)}`, request),
       { status: 307 }
     );
   }

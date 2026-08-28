@@ -105,7 +105,7 @@ export async function getSiteDriveBaseUrl(): Promise<string> {
   const siteId = await getConfiguredSharePointSiteId();
   if (!siteId) {
     throw new Error(
-      "SharePoint site is not configured. Open /setup and connect an org SharePoint site."
+      "SharePoint site is not configured. Open /console and connect an org SharePoint site."
     );
   }
   return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drive`;
@@ -123,7 +123,7 @@ export async function listSiteDrives(
   const siteId = await getConfiguredSharePointSiteId();
   if (!siteId) {
     throw new Error(
-      "SharePoint site is not configured. Open /setup and connect an org SharePoint site."
+      "SharePoint site is not configured. Open /console and connect an org SharePoint site."
     );
   }
 

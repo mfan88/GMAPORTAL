@@ -28,10 +28,12 @@ Collecting assessment videos is usually slow and messy: large files bounce off e
 
 ## How it works
 
-1. Staff pick a child and create a time-limited upload link.
+1. Staff pick a child and create a time-limited upload link (`/link/{token}`).
 2. They send that link the same way they already communicate with families.
-3. The parent opens it, chooses the date the video was recorded, and uploads one video.
+3. The parent opens it, lands on `/link`, chooses the date the video was recorded, and uploads one video.
 4. The file is stored in the clinic’s connected Microsoft 365 location, and staff are notified.
+
+The public homepage is `/`. The upload form at `/link` only works after a valid invitation cookie.
 
 ## Stack
 
@@ -46,11 +48,7 @@ Collecting assessment videos is usually slow and messy: large files bounce off e
 
 ## Documentation
 
-Product docs (how the portal works, who it is for, and the technical building blocks):
-
-**[apps.fenna.tech/secure-upload-portal/docs](https://apps.fenna.tech/secure-upload-portal/docs)**
-
-Overview landing page: [apps.fenna.tech/secure-upload-portal](https://apps.fenna.tech/secure-upload-portal)
+Clinic and technical docs (admin sign-in required): **`/docs`** on this deployment — [upload.develop.bc.ca/docs](https://upload.develop.bc.ca/docs).
 
 In-app public pages: `/info`, `/privacy`, `/tos`.
 

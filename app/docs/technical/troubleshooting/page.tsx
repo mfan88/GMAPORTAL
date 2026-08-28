@@ -1,0 +1,11 @@
+import { DocArticle } from "@/components/docsChrome";
+
+const html = '<table>\n<thead><tr><th>Symptom</th><th>Likely cause</th></tr></thead>\n<tbody>\n<tr><td>Upload button stays disabled</td><td>Missing date recorded, or <code>/api/upload/context</code> missing name/EDC (open via portal link)</td></tr>\n<tr><td>Works in desktop DevTools, fails on iPhone</td><td>Use real device testing; ensure mobile file input path; empty MIME handling</td></tr>\n<tr><td>Graph / SPO license errors</td><td>Receiving account lacks OneDrive/SharePoint capability</td></tr>\n<tr><td><code>DomainNotLinked</code> email error</td><td>Sender domain not connected to the ACS resource used by the connection string</td></tr>\n<tr><td>OneDrive reconnect keeps old account</td><td>Clear token cache path / Blob; use Change receiving OneDrive flow</td></tr>\n<tr><td>HMR blocked from phone IP</td><td>Add host to <code>allowedDevOrigins</code> in <code>next.config.ts</code></td></tr>\n</tbody></table>\n<h2>Smoke-test checklist (production)</h2>\n<ul>\n<li>Admin can sign in at <code>/console</code></li>\n<li>Receiving OneDrive shows connected</li>\n<li>Child names load from Excel</li>\n<li>Generate link → open on phone Safari → upload small video</li>\n<li>File appears in OneDrive with expected name</li>\n<li>Notification email arrives with working link</li>\n<li>Same link cannot upload again</li>\n</ul>\n<h2>Known hardening notes</h2>\n<ol>\n<li><code>GET</code> / <code>DELETE /api/links</code> — consider requiring admin auth before wide public deployment.</li>\n<li><code>GET /api/config</code> — public; exposes limits and allowlisted admin emails.</li>\n<li><code>lib/server.ts</code> size — split Graph, Redis links, and OAuth when making large changes.</li>\n<li>Default admin email in code defaults — prefer env/Settings as source of truth.</li>\n<li>Portal required for naming — uploads without a portal link token cannot resolve the GMA filename.</li>\n<li>Email is best-effort — monitor server logs for ACS errors.</li>\n<li>Secrets — never commit <code>.env.local</code>; rotate ACS keys and Azure client secrets if exposed.</li>\n</ol>';
+
+export default function Page() {
+  return (
+    <DocArticle title='Troubleshooting'>
+        <div dangerouslySetInnerHTML={{ __html: html }} />
+      </DocArticle>
+  );
+}

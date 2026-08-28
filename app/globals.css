@@ -125,6 +125,7 @@
   }
   html {
     @apply font-sans;
+    color-scheme: light;
   }
 }
 
@@ -148,4 +149,86 @@
   background-clip: text;
   color: transparent;
   animation: shimmer 1.4s linear infinite;
+}
+
+.docs-prose h2 {
+  margin-top: 2rem;
+  font-family: var(--font-heading), "Open Sans", sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #02182b;
+}
+
+.docs-prose h3 {
+  margin-top: 1.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #02182b;
+}
+
+.docs-prose strong {
+  color: #02182b;
+  font-weight: 600;
+}
+
+.docs-prose a {
+  color: #e98300;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.docs-prose ol,
+.docs-prose ul {
+  padding-left: 1.25rem;
+}
+
+.docs-prose ol {
+  list-style: decimal;
+}
+
+.docs-prose ul {
+  list-style: disc;
+}
+
+.docs-prose li + li {
+  margin-top: 0.35rem;
+}
+
+.docs-prose code {
+  border-radius: 0.25rem;
+  background: #f4f6f8;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.9em;
+  color: #02182b;
+}
+
+.docs-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.docs-prose th,
+.docs-prose td {
+  border-bottom: 1px solid rgb(2 24 43 / 12%);
+  padding: 0.55rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-prose th {
+  color: #02182b;
+  font-weight: 600;
+}
+
+.docs-prose pre {
+  overflow-x: auto;
+  border-radius: 0.25rem;
+  border: 1px solid rgb(2 24 43 / 12%);
+  background: #f8f9fb;
+  padding: 1rem 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #02182b;
 }

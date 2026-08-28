@@ -1,119 +1,132 @@
-"use client";
-import { InfoGroup, MobileInfoGroup } from "@/components/infoGroup";
-import { UploadArea, MobileUploadArea } from "@/components/uploadArea";
-import { useFileProviderContext } from "@/app/fileprovider";
-import { useTheme } from "next-themes";
-import { useEffect } from "react";
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { Separator } from "@/components/ui/separator";
-import { format } from "date-fns";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { PARENT_UPLOAD_PATH } from "@/lib/parentLink";
+import { APP_DISPLAY_NAME, PUBLISHER_CONTACT_EMAIL } from "@/lib/publisher";
+import {
+  cookieHeaderFromStore,
+  getPortalAccessTokenFromRequest,
+  uploadLinkUsable,
+} from "@/lib/server/index";
 
-function formatWindowTime(ms: number) {
-  return format(new Date(ms), "MMM d, yyyy 'at' h:mm a");
-}
+export const dynamic = "force-dynamic";
 
-function InstructionsText() {
-  const { uploadWindow, linkContextReady } = useFileProviderContext();
+export const metadata: Metadata = {
+  title: "General Movement Assessment Video Upload",
+  description:
+    "Private GMA video upload portal for the Vancouver Infant Development Program at the Developmental Disabilities Association.",
+};
 
-  if (linkContextReady && uploadWindow) {
-    return `Please upload a video between ${formatWindowTime(uploadWindow.availableAt)} and ${formatWindowTime(uploadWindow.expiresAt)}, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.`;
+export default async function HomePage({
+  searchParams,
+}: Readonly<{
+  searchParams: Promise<{ needLink?: string | string[] }>;
+}>) {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieHeaderFromStore(cookieStore);
+  const token = getPortalAccessTokenFromRequest({
+    headers: { cookie: cookieHeader },
+  });
+  if (token && (await uploadLinkUsable(token))) {
+    redirect(PARENT_UPLOAD_PATH);
   }
 
-  return "Please upload a video within the time window on your clinic link, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.";
-}
-
-export default function Page() {
-  const { setTheme } = useTheme();
-
-  useEffect(() => {
-    setTheme("light");
-  }, [setTheme]);
+  const params = await searchParams;
+  const needLink = Array.isArray(params.needLink)
+    ? params.needLink[0]
+    : params.needLink;
 
   return (
-    <div className="min-h-dvh max-w-dvw bg-white text-black">
-      <header className="box-border flex h-[10dvh] max-h-[10dvh] shrink-0 items-center justify-between overflow-hidden px-4 py-2 dark:bg-white">
-        <Image
-          className="h-full max-h-full w-auto object-contain"
-          src="/images/dda-logo.svg"
-          alt="DDA logo"
-          width={1338}
-          height={472}
-          priority
-        />
-      </header>
-
-      <div className="flex justify-end px-4 pb-1 sm:hidden">
-        <Link
-          href="/setup"
-          className="rounded-md px-2 py-1 text-xs text-black/40 underline-offset-4"
-        >
-          Are you an admin?
-        </Link>
-      </div>
-
-      {/* Desktop and Tablet View */}
-      <div className="flex hidden h-auto w-full flex-col gap-5 bg-white p-6 text-black select-none sm:block">
-        <section className="h-4em box-border flex justify-center p-15">
-          <h1 className="text-center font-medium text-black md:text-xl lg:text-4xl">
-            General Movements Assessment (GMA) Video Portal for the Vancouver
-            Infant Development Program
-          </h1>
-        </section>
-        <section className="flex w-full flex-row gap-0">
-          <div className="relative flex w-[50%] flex-shrink-0 flex-row items-center justify-center">
-            <UploadArea className="flex h-[50%] w-full flex-shrink-0" />
-            <Separator
-              orientation="vertical"
-              className="absolute right-0 h-full rounded-sm bg-black/50 p-0.25"
+    <div className="min-h-dvh bg-white text-[#02182B]">
+      <header className="border-b border-[#02182B]/10">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+          <Link href="/" className="block h-12 sm:h-14">
+            <Image
+              className="h-full w-auto"
+              src="/images/dda-logo.svg"
+              alt="Developmental Disabilities Association"
+              width={1338}
+              height={472}
+              priority
             />
-          </div>
-          <div className="box-border flex w-full flex-col px-20">
-            <div className="flex flex-col gap-5">
-              <section>
-                <span className="text-xl font-medium">Instructions</span>
-                <Separator
-                  orientation="horizontal"
-                  className="rounded p-0.25"
-                />
-              </section>
-              <span className="text-md whitespace-pre-line">
-                <InstructionsText />
-              </span>
-              <InfoGroup />
-            </div>
-          </div>
-        </section>
-      </div>
+          </Link>
+          <Link
+            href="/console"
+            className="inline-flex items-center rounded-full border border-[#E98300] px-4 py-1.5 text-xs font-semibold tracking-wide uppercase hover:bg-[#E98300] hover:text-white sm:text-sm"
+          >
+            Staff sign in
+          </Link>
+        </div>
+      </header>
+      <div className="h-1 bg-[#E98300]" />
 
-      {/* Mobile View */}
-      <div className="h-auto w-dvw bg-white pb-[calc(6rem+env(safe-area-inset-bottom,0px))] sm:hidden">
-        <section className="box-border flex h-auto justify-center p-10">
-          <h1 className="text-center font-medium text-black">
-            General Movements Assessment (GMA) Video Portal for the Vancouver
-            Infant Development Program
-          </h1>
-        </section>
-        <section className="flex h-auto w-full flex-col gap-1 px-10">
-          <h2 className="font-medium">Instructions</h2>
-          <span className="text-md whitespace-pre-line">
-            <InstructionsText />
-          </span>
-        </section>
-        <section className="mt-5 box-border w-full px-10">
-          <MobileInfoGroup />
-        </section>
-        <section className="mt-5 box-border w-full px-10">
-          <MobileUploadArea />
-        </section>
-      </div>
+      <main className="mx-auto w-full max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
+        <p className="text-sm font-semibold tracking-[0.16em] text-[#E98300] uppercase">
+          Vancouver Infant Development Program
+        </p>
+        <h1 className="font-heading mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+          General Movement Assessment Video Upload
+        </h1>
+        <p className="mt-4 text-base leading-relaxed text-[#02182B]/80 sm:text-lg">
+          Families share a General Movements Assessment video with the clinic
+          through a private, one-time link. There is nothing to upload from this
+          page.
+        </p>
 
-      <Link
-        href="/setup"
-        className="fixed right-3 bottom-3 z-40 hidden rounded-md px-2 py-1 text-xs text-black/40 underline-offset-4 transition-colors hover:text-black/80 hover:underline sm:block"
-      >
-        Are you an admin?
-      </Link>
+        {needLink ? (
+          <p className="mt-6 rounded-sm border border-[#E98300]/40 bg-[#E98300]/10 px-4 py-3 text-sm leading-relaxed">
+            The upload form is only available from the temporary link the clinic
+            sent you. Open that full link on this device. If you do not have
+            one, ask the clinic for a new invitation.
+          </p>
+        ) : null}
+
+        <section className="mt-10 space-y-3">
+          <h2 className="font-heading text-xl font-semibold">For families</h2>
+          <p className="leading-relaxed text-[#02182B]/80">
+            Use the link in the message from your clinic. It opens a short
+            upload page, works once, and then stops. You do not need an account
+            or an app.
+          </p>
+        </section>
+
+        <section className="mt-8 space-y-3">
+          <h2 className="font-heading text-xl font-semibold">For clinic staff</h2>
+          <p className="leading-relaxed text-[#02182B]/80">
+            Sign in with an allowlisted Microsoft work account to create parent
+            links and manage settings.
+          </p>
+          <Link
+            href="/console"
+            className="inline-flex items-center rounded-full bg-[#02182B] px-5 py-2 text-sm font-semibold tracking-wide text-white uppercase hover:bg-[#02182B]/90"
+          >
+            Open console
+          </Link>
+        </section>
+      </main>
+
+      <footer className="mx-auto w-full max-w-3xl border-t border-[#02182B]/10 px-4 py-8 text-sm text-[#02182B]/70 sm:px-6">
+        <p>{APP_DISPLAY_NAME}</p>
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+          <Link href="/info" className="underline underline-offset-2">
+            About
+          </Link>
+          <Link href="/privacy" className="underline underline-offset-2">
+            Privacy
+          </Link>
+          <Link href="/tos" className="underline underline-offset-2">
+            Terms
+          </Link>
+          <a
+            className="underline underline-offset-2"
+            href={`mailto:${PUBLISHER_CONTACT_EMAIL}`}
+          >
+            {PUBLISHER_CONTACT_EMAIL}
+          </a>
+        </p>
+      </footer>
     </div>
   );
 }

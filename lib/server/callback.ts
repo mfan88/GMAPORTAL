@@ -9,10 +9,13 @@ import { adminAllowlistRejectionReason } from "./configHelper";
 import { createAdminAccessCookieHeader } from "./cookies";
 import { msalClientSecret } from "./msalHelpers";
 import {
+  clearAdminNextCookieHeader,
   clearAuthFlowCookieHeader,
   clearPkceCookieHeader,
+  getAdminNextCookie,
   getAuthFlowCookie,
   getPkceCookie,
+  safeAdminNextPath,
 } from "./pkce";
 import { publicUrl, toRequestShape } from "./shape";
 
@@ -35,6 +38,7 @@ type RequestShape = ReturnType<typeof toRequestShape>;
 const CLEAR_AUTH_COOKIES = () => [
   clearPkceCookieHeader(),
   clearAuthFlowCookieHeader(),
+  clearAdminNextCookieHeader(),
 ];
 
 function errorRedirect(
@@ -45,7 +49,7 @@ function errorRedirect(
   const destination =
     flow === "upload-access" || flow === "admin"
       ? `/upload-access-denied?error=${encodeURIComponent(reason)}`
-      : `/setup?error=${encodeURIComponent(reason)}`;
+      : `/console?error=${encodeURIComponent(reason)}`;
   return redirectWithCookies(request, destination, CLEAR_AUTH_COOKIES());
 }
 
@@ -61,7 +65,7 @@ async function completeSiteGrantFlow(
   if (!username || !result.accessToken) {
     return redirectWithCookies(
       request,
-      "/setup?error=missing_account",
+      "/console?error=missing_account",
       clearCookies
     );
   }
@@ -70,14 +74,14 @@ async function completeSiteGrantFlow(
   if (adminRejection) {
     return redirectWithCookies(
       request,
-      `/setup?error=${adminRejection}`,
+      `/console?error=${adminRejection}`,
       clearCookies
     );
   }
 
   const siteId = await getConfiguredSharePointSiteId();
   if (!siteId) {
-    return redirectWithCookies(request, "/setup?error=site_not_connected", [
+    return redirectWithCookies(request, "/console?error=site_not_connected", [
       ...clearCookies,
       createAdminAccessCookieHeader(username),
     ]);
@@ -89,12 +93,12 @@ async function completeSiteGrantFlow(
     const message = error instanceof Error ? error.message : "grant_failed";
     return redirectWithCookies(
       request,
-      `/setup?error=${encodeURIComponent(message)}`,
+      `/console?error=${encodeURIComponent(message)}`,
       [...clearCookies, createAdminAccessCookieHeader(username)]
     );
   }
 
-  return redirectWithCookies(request, "/setup?granted=1", [
+  return redirectWithCookies(request, "/console?granted=1", [
     ...clearCookies,
     createAdminAccessCookieHeader(username),
   ]);
@@ -142,7 +146,9 @@ async function completeAdminFlow(
     );
   }
 
-  return redirectWithCookies(request, "/setup", [
+  const next = safeAdminNextPath(getAdminNextCookie(shaped));
+
+  return redirectWithCookies(request, next, [
     ...clearCookies,
     createAdminAccessCookieHeader(signedInAccount.username),
   ]);
@@ -156,7 +162,7 @@ async function completeSetupFlow(
 ): Promise<NextResponse> {
   return redirectWithCookies(
     request,
-    "/setup?error=use_sharepoint_connect",
+    "/console?error=use_sharepoint_connect",
     CLEAR_AUTH_COOKIES()
   );
 }

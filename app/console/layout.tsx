@@ -5,7 +5,7 @@ import { cookieHeaderFromStore, hasValidAdminAccess } from "@/lib/server/index";
 
 export const dynamic = "force-dynamic";
 
-export default async function SetupLayout({
+export default async function ConsoleLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   // Console access is gated by the admin allowlist cookie (Microsoft User.Read).
