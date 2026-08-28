@@ -3,7 +3,7 @@ import {
   getOneDriveAccessToken,
   hasValidAdminAccess,
   listReferenceWorkbookColumns,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

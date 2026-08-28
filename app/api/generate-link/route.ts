@@ -7,7 +7,7 @@ import {
     createUploadLink,
     toRequestShape,
     hasValidAdminAccess,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

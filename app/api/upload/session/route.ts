@@ -8,7 +8,7 @@ import {
     canAccessUploadPortal,
     resolvePortalUploadFilename,
     toRequestShape,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

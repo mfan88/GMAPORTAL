@@ -92,6 +92,9 @@ export type OneDriveUploadResult = {
   name: string
   webUrl: string
   size: number
+  parentReference?: {
+    driveId?: string
+  }
 }
 
 export type OneDriveUploadSession = {

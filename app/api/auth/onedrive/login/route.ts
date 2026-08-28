@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
-import { hasValidAdminAccess, publicUrl } from "@/lib/server"
+import { hasValidAdminAccess, publicUrl } from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

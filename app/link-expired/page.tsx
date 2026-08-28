@@ -5,7 +5,7 @@ import {
     AlertTitle,
 } from "@/components/ui/alert"
 import LinkPendingCountdown from "@/components/linkPendingCountdown"
-import { getAppConfig, linkExpirySeconds } from "@/lib/server"
+import { getAppConfig, linkExpirySeconds } from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

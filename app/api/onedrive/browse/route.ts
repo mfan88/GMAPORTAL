@@ -4,7 +4,7 @@ import {
   hasValidAdminAccess,
   listOneDriveRootFolders,
   listOneDriveWorkbooks,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

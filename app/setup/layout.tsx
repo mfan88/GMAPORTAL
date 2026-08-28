@@ -4,7 +4,7 @@ import { redirect } from "next/navigation"
 import {
     cookieHeaderFromStore,
     hasValidAdminAccess,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

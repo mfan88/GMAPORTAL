@@ -5,17 +5,20 @@ import {
   canAccessUploadPortal,
   clearUploadAccessCookieHeader,
   consumeUploadLink,
+  createFileRedirectUrl,
   getAppConfig,
   getPortalAccessTokenFromRequest,
   getUploadLink,
   toRequestShape,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 
 type CompleteBody = {
   webUrl?: string
   name?: string
+  id?: string
+  parentReference?: { driveId?: string }
 }
 
 /**
@@ -43,10 +46,13 @@ export async function POST(request: NextRequest) {
   }
 
   const token = getPortalAccessTokenFromRequest(shaped)
-  const webUrl = typeof body.webUrl === "string" ? body.webUrl.trim() : ""
-  const fileName = typeof body.name === "string" ? body.name.trim() : ""
+  const itemId = typeof body.id === "string" ? body.id.trim() : ""
+  const driveId =
+    typeof body.parentReference?.driveId === "string"
+      ? body.parentReference.driveId.trim()
+      : ""
 
-  if (token && webUrl) {
+  if (token) {
     try {
       const [link, config] = await Promise.all([
         getUploadLink(token),
@@ -56,11 +62,22 @@ export async function POST(request: NextRequest) {
       const childName = link?.childName?.trim() ?? ""
       const recipients = config.uploadNotificationEmails
 
-      if (childName) {
+      if (!childName) {
+        console.warn(
+          "Upload notification email skipped: portal link has no child name"
+        )
+      } else if (!itemId) {
+        console.warn(
+          "Upload notification email skipped: missing Graph item id for redirect link"
+        )
+      } else {
+        const fileUrl = await createFileRedirectUrl(request, {
+          itemId,
+          driveId: driveId || undefined,
+        })
         const result = await sendUploadNotificationEmail({
           childName,
-          fileUrl: webUrl,
-          fileName: fileName || undefined,
+          fileUrl,
           to: recipients,
         })
         if (!result.sent) {
@@ -69,13 +86,10 @@ export async function POST(request: NextRequest) {
             result.skippedReason
           )
         }
-      } else {
-        console.warn(
-          "Upload notification email skipped: portal link has no child name"
-        )
       }
     } catch (error) {
       // Upload already succeeded — never fail completion because mail failed.
+      // Do not fall back to the SharePoint webUrl in the email.
       console.error("Failed to send upload notification email:", error)
     }
   }

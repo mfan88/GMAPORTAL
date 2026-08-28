@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { handleOneDriveOAuthCallback } from "@/lib/server"
+import { handleOneDriveOAuthCallback } from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

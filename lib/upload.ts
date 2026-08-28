@@ -175,6 +175,8 @@ async function finalizeUpload(
       body: JSON.stringify({
         webUrl: result.webUrl,
         name: result.name,
+        id: result.id,
+        parentReference: result.parentReference,
       }),
     })
   } catch (error) {

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import {
   connectSharePointSite,
   hasValidAdminAccess,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 

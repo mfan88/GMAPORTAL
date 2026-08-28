@@ -251,6 +251,148 @@ function DurationField({
   )
 }
 
+function AdminEmailsCard({
+  mode,
+  emails,
+  newEmail,
+  pendingRemoveEmail,
+  onNewEmailChange,
+  onAdd,
+  onRemove,
+  onCancelPendingRemove,
+  onClose,
+}: Readonly<{
+  mode: "view" | "manage"
+  emails: string[]
+  newEmail: string
+  pendingRemoveEmail: string | null
+  onNewEmailChange: (value: string) => void
+  onAdd: () => void
+  onRemove: (email: string) => void
+  onCancelPendingRemove: () => void
+  onClose: () => void
+}>) {
+  const managing = mode === "manage"
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-emails-card-title"
+        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-xl border border-black/15 bg-background p-5 shadow-lg"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2 id="admin-emails-card-title" className="text-sm font-medium">
+            {managing ? "Add and remove emails" : "Allowed admin emails"}
+          </h2>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 px-2"
+            onClick={onClose}
+          >
+            <X className="size-3.5" />
+            Close
+          </Button>
+        </div>
+
+        <ul className="mt-4 divide-y divide-black/10 overflow-y-auto rounded-lg border border-black/10">
+          {emails.length === 0 ? (
+            <li className="px-3 py-3 text-sm text-black/45">
+              No admin emails yet.
+            </li>
+          ) : (
+            emails.map((email) => {
+              const confirming = pendingRemoveEmail === email
+              return (
+                <li
+                  key={email}
+                  className="flex items-center gap-2 px-3 py-2.5"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm">
+                    {email}
+                  </span>
+                  {managing ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={confirming ? "destructive" : "outline"}
+                      className="h-8 shrink-0 gap-1 px-2"
+                      onClick={() => onRemove(email)}
+                      onBlur={() => {
+                        if (pendingRemoveEmail === email) {
+                          onCancelPendingRemove()
+                        }
+                      }}
+                    >
+                      {confirming ? (
+                        <>
+                          <Check className="size-3.5" />
+                          Confirm
+                        </>
+                      ) : (
+                        <Minus className="size-3.5" />
+                      )}
+                    </Button>
+                  ) : null}
+                </li>
+              )
+            })
+          )}
+        </ul>
+
+        {managing ? (
+          <div className="mt-3 flex flex-col gap-2">
+            <Label htmlFor="settings-new-admin-email" className="text-xs">
+              New admin email
+            </Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="settings-new-admin-email"
+                type="email"
+                autoFocus
+                placeholder="name@company.com"
+                value={newEmail}
+                onChange={(event) => onNewEmailChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    onAdd()
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault()
+                    onClose()
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                className="gap-1"
+                onClick={onAdd}
+              >
+                <Plus className="size-3.5" />
+                Add
+              </Button>
+            </div>
+            <p className="text-xs text-black/45">
+              Click − once, then Confirm to remove. Changes apply when you
+              Save settings.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsCard({
   connected,
   onBanner,
@@ -274,7 +416,7 @@ export default function SettingsCard({
   )
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saved, setSaved] = useState<SettingsForm | null>(null)
-  const [addingEmail, setAddingEmail] = useState(false)
+  const [emailPanel, setEmailPanel] = useState<"view" | "manage" | null>(null)
   const [newEmail, setNewEmail] = useState("")
   const [pendingRemoveEmail, setPendingRemoveEmail] = useState<string | null>(
     null
@@ -518,8 +660,8 @@ export default function SettingsCard({
         form.edcColumn.trim().toLowerCase()
   )
 
-  const resetEmailEditor = () => {
-    setAddingEmail(false)
+  const closeEmailPanel = () => {
+    setEmailPanel(null)
     setNewEmail("")
     setPendingRemoveEmail(null)
   }
@@ -527,7 +669,7 @@ export default function SettingsCard({
   const cancel = () => {
     if (saved) setForm(saved)
     setEditing(false)
-    resetEmailEditor()
+    closeEmailPanel()
   }
 
   const confirmAddEmail = () => {
@@ -551,7 +693,8 @@ export default function SettingsCard({
         allowedAdminEmails: [...prev.allowedAdminEmails, email],
       }
     })
-    resetEmailEditor()
+    setNewEmail("")
+    setPendingRemoveEmail(null)
     onBanner(null)
   }
 
@@ -650,7 +793,7 @@ export default function SettingsCard({
       setForm(nextForm)
       setSaved(nextForm)
       setEditing(false)
-      resetEmailEditor()
+      closeEmailPanel()
       onBanner({ type: "success", message: "Settings saved." })
       onConfigSaved?.()
     } catch (error) {
@@ -673,7 +816,7 @@ export default function SettingsCard({
             disabled={!connected || loading || !form}
             onClick={() => {
               setEditing(true)
-              resetEmailEditor()
+              closeEmailPanel()
               void loadBrowse()
             }}
           >
@@ -941,126 +1084,56 @@ export default function SettingsCard({
           </p>
 
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label>Allowed admin emails</Label>
-              {editing && !addingEmail ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8 gap-1 px-2"
-                  onClick={() => {
-                    setPendingRemoveEmail(null)
-                    setAddingEmail(true)
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                  Add
-                </Button>
-              ) : null}
+            <Label>Allowed admin emails</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setPendingRemoveEmail(null)
+                  setEmailPanel("view")
+                }}
+              >
+                View emails
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!editing}
+                onClick={() => {
+                  setPendingRemoveEmail(null)
+                  setNewEmail("")
+                  setEmailPanel("manage")
+                }}
+              >
+                Add and remove emails
+              </Button>
             </div>
-
-            <ul className="divide-y divide-black/10 overflow-hidden rounded-lg border border-black/10">
-              {form.allowedAdminEmails.length === 0 ? (
-                <li className="px-3 py-3 text-sm text-black/45">
-                  No admin emails yet.
-                </li>
-              ) : (
-                form.allowedAdminEmails.map((email) => {
-                  const confirming = pendingRemoveEmail === email
-                  return (
-                    <li
-                      key={email}
-                      className="flex items-center gap-2 px-3 py-2.5"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-sm">
-                        {email}
-                      </span>
-                      {editing ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={confirming ? "destructive" : "outline"}
-                          className="h-8 shrink-0 gap-1 px-2"
-                          onClick={() => requestRemoveEmail(email)}
-                          onBlur={() => {
-                            if (pendingRemoveEmail === email) {
-                              setPendingRemoveEmail(null)
-                            }
-                          }}
-                        >
-                          {confirming ? (
-                            <>
-                              <Check className="size-3.5" />
-                              Confirm
-                            </>
-                          ) : (
-                            <Minus className="size-3.5" />
-                          )}
-                        </Button>
-                      ) : null}
-                    </li>
-                  )
-                })
-              )}
-            </ul>
-
-            {editing && addingEmail ? (
-              <div className="flex flex-col gap-2 rounded-lg border border-black/10 p-3">
-                <Label htmlFor="settings-new-admin-email" className="text-xs">
-                  New admin email
-                </Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    id="settings-new-admin-email"
-                    type="email"
-                    autoFocus
-                    placeholder="name@company.com"
-                    value={newEmail}
-                    onChange={(event) => setNewEmail(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault()
-                        confirmAddEmail()
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault()
-                        resetEmailEditor()
-                      }
-                    }}
-                  />
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="gap-1"
-                      onClick={confirmAddEmail}
-                    >
-                      <Check className="size-3.5" />
-                      Confirm
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="gap-1"
-                      onClick={resetEmailEditor}
-                    >
-                      <X className="size-3.5" />
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
             <p className="text-xs text-black/45">
-              These work accounts can open this admin console. Click − once,
-              then Confirm to remove.
+              These work accounts can open this admin console.
+              {editing
+                ? " Use Add and remove emails to change the list, then Save."
+                : " Click Change first to add or remove addresses."}
             </p>
           </div>
         </div>
       )}
+
+      {form && emailPanel ? (
+        <AdminEmailsCard
+          mode={emailPanel}
+          emails={form.allowedAdminEmails}
+          newEmail={newEmail}
+          pendingRemoveEmail={pendingRemoveEmail}
+          onNewEmailChange={setNewEmail}
+          onAdd={confirmAddEmail}
+          onRemove={requestRemoveEmail}
+          onCancelPendingRemove={() => setPendingRemoveEmail(null)}
+          onClose={closeEmailPanel}
+        />
+      ) : null}
     </section>
   )
 }

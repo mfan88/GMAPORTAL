@@ -5,7 +5,6 @@ import { EmailClient, type EmailMessage } from "@azure/communication-email"
 export type UploadNotificationInput = {
   childName: string
   fileUrl: string
-  fileName?: string
   /** Microsoft account(s) that should receive the notice (drive owner / admins). */
   to: string[]
 }
@@ -32,8 +31,8 @@ function getSenderAddress(): string | null {
 
 /**
  * Notify clinic staff that a parent uploaded a GMA video.
- * Subject includes the child name from the temp portal link; body links to the
- * file in the connected OneDrive.
+ * Subject includes the child name from the temp portal link; body links only
+ * to the same-origin /v/{slug} redirect (never the SharePoint webUrl).
  */
 export async function sendUploadNotificationEmail(
   input: UploadNotificationInput
@@ -76,29 +75,20 @@ export async function sendUploadNotificationEmail(
 
   const safeName = escapeHtml(childName)
   const safeUrl = escapeHtml(fileUrl)
-  const safeFileName = input.fileName?.trim()
-    ? escapeHtml(input.fileName.trim())
-    : null
 
   const subject = `${childName}'s parent has uploaded a new video to your OneDrive`
   const plainText = [
     `Hello,`,
     ``,
     `${childName}'s parent has uploaded a new video to your OneDrive.`,
-    safeFileName ? `File: ${input.fileName!.trim()}` : null,
     ``,
-    `Open the video here:`,
-    fileUrl,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n")
+    `Open the video: ${fileUrl}`,
+  ].join("\n")
 
   const html = `
     <p>Hello,</p>
     <p><strong>${safeName}</strong>'s parent has uploaded a new video to your OneDrive.</p>
-    ${safeFileName ? `<p>File: ${safeFileName}</p>` : ""}
-    <p><a href="${safeUrl}">Open the video in OneDrive</a></p>
-    <p style="word-break:break-all;color:#555;font-size:12px;">${safeUrl}</p>
+    <p><a href="${safeUrl}">Open the video</a></p>
   `.trim()
 
   const message: EmailMessage = {

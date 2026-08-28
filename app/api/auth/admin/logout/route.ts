@@ -6,7 +6,7 @@ import {
   clearPkceCookieHeader,
   getMicrosoftLogoutUrl,
   publicUrl,
-} from "@/lib/server"
+} from "@/lib/server/index"
 
 export const dynamic = "force-dynamic"
 
