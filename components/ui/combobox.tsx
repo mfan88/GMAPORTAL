@@ -1,41 +1,39 @@
-"use client"
+"use client";
 
-import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { CheckIcon, ChevronDownIcon, XIcon } from "lucide-react"
+import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
+import { CheckIcon, ChevronDownIcon, XIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
-type ComboboxItem = { label: string; value: string }
+type ComboboxItem = { label: string; value: string };
 
 type ComboboxSharedProps = {
-  items: ComboboxItem[]
-  placeholder?: string
-  emptyText?: string
-  id?: string
-  disabled?: boolean
-}
+  items: ComboboxItem[];
+  placeholder?: string;
+  emptyText?: string;
+  id?: string;
+  disabled?: boolean;
+};
 
 type ComboboxProps =
   | (ComboboxSharedProps & {
-      multiple?: false
-      value: string | null
-      onValueChange: (value: string | null) => void
+      multiple?: false;
+      value: string | null;
+      onValueChange: (value: string | null) => void;
     })
   | (ComboboxSharedProps & {
-      multiple: true
-      value: string[]
-      onValueChange: (value: string[]) => void
-    })
+      multiple: true;
+      value: string[];
+      onValueChange: (value: string[]) => void;
+    });
 
 const popupClassName =
-  "isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 animate-none! relative bg-popover/70 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150"
+  "isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 animate-none! relative bg-popover/70 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150";
 
 const itemClassName =
-  "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none data-highlighted:bg-foreground/10 data-disabled:pointer-events-none data-disabled:opacity-50"
+  "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none data-highlighted:bg-foreground/10 data-disabled:pointer-events-none data-disabled:opacity-50";
 
-function ComboboxPopup({
-  emptyText,
-}: Readonly<{ emptyText: string }>) {
+function ComboboxPopup({ emptyText }: Readonly<{ emptyText: string }>) {
   return (
     <ComboboxPrimitive.Portal>
       <ComboboxPrimitive.Positioner
@@ -69,7 +67,7 @@ function ComboboxPopup({
         </ComboboxPrimitive.Popup>
       </ComboboxPrimitive.Positioner>
     </ComboboxPrimitive.Portal>
-  )
+  );
 }
 
 function Combobox(props: ComboboxProps) {
@@ -79,13 +77,13 @@ function Combobox(props: ComboboxProps) {
     emptyText = "No matches.",
     id,
     disabled,
-  } = props
-  const filter = ComboboxPrimitive.useFilter({ sensitivity: "base" })
+  } = props;
+  const filter = ComboboxPrimitive.useFilter({ sensitivity: "base" });
   const selectedItems = props.multiple
     ? props.value
         .map((value) => items.find((item) => item.value === value))
         .filter((item): item is ComboboxItem => item != null)
-    : (items.find((item) => item.value === props.value) ?? null)
+    : (items.find((item) => item.value === props.value) ?? null);
 
   return (
     <ComboboxPrimitive.Root
@@ -95,12 +93,12 @@ function Combobox(props: ComboboxProps) {
       value={selectedItems}
       onValueChange={(next) => {
         if (props.multiple) {
-          const selected = Array.isArray(next) ? next : []
-          props.onValueChange(selected.map((item) => item.value))
-          return
+          const selected = Array.isArray(next) ? next : [];
+          props.onValueChange(selected.map((item) => item.value));
+          return;
         }
-        const selected = Array.isArray(next) ? next[0] : next
-        props.onValueChange(selected?.value ?? null)
+        const selected = Array.isArray(next) ? next[0] : next;
+        props.onValueChange(selected?.value ?? null);
       }}
       itemToStringLabel={(item) => item.label}
       isItemEqualToValue={(item, current) => item.value === current.value}
@@ -177,7 +175,7 @@ function Combobox(props: ComboboxProps) {
       )}
       <ComboboxPopup emptyText={emptyText} />
     </ComboboxPrimitive.Root>
-  )
+  );
 }
 
-export { Combobox }
+export { Combobox };

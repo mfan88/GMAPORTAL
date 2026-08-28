@@ -1,18 +1,18 @@
-import type { Metadata } from "next"
-import Link from "next/link"
-import SiteInfoShell from "@/components/siteInfoShell"
+import type { Metadata } from "next";
+import Link from "next/link";
+import SiteInfoShell from "@/components/siteInfoShell";
 import {
   APP_DISPLAY_NAME,
   APP_SHORT_NAME,
   LEGAL_EFFECTIVE_DATE,
   PUBLISHER_CONTACT_EMAIL,
   PUBLISHER_NAME,
-} from "@/lib/publisher"
+} from "@/lib/publisher";
 
 export const metadata: Metadata = {
   title: `${APP_SHORT_NAME} — Privacy Statement`,
   description: `Privacy Statement for ${APP_DISPLAY_NAME}.`,
-}
+};
 
 export default function PrivacyPage() {
   return (
@@ -65,12 +65,8 @@ export default function PrivacyPage() {
             To authenticate clinic administrators and connect a receiving
             Microsoft OneDrive account via Microsoft Graph.
           </li>
-          <li>
-            To create, validate, and expire time-limited upload links.
-          </li>
-          <li>
-            To maintain, secure, troubleshoot, and improve the Service.
-          </li>
+          <li>To create, validate, and expire time-limited upload links.</li>
+          <li>To maintain, secure, troubleshoot, and improve the Service.</li>
           <li>
             To respond to support requests sent to{" "}
             <a
@@ -88,12 +84,16 @@ export default function PrivacyPage() {
         <h2 className="font-heading text-xl font-medium">
           3. How information is shared
         </h2>
-        <p>We do not sell personal information. Information may be shared with:</p>
+        <p>
+          We do not sell personal information. Information may be shared with:
+        </p>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            <strong>The clinic / Developmental Disabilities Association
-            program:</strong> uploaded videos and related details are delivered
-            to the clinic-managed OneDrive destination for assessment use.
+            <strong>
+              The clinic / Developmental Disabilities Association program:
+            </strong>{" "}
+            uploaded videos and related details are delivered to the
+            clinic-managed OneDrive destination for assessment use.
           </li>
           <li>
             <strong>Microsoft:</strong> sign-in and file storage use Microsoft
@@ -126,8 +126,8 @@ export default function PrivacyPage() {
       <section className="space-y-3">
         <h2 className="font-heading text-xl font-medium">5. Security</h2>
         <p>
-          We use reasonable administrative and technical measures appropriate
-          to the Service, including authenticated administrator access and
+          We use reasonable administrative and technical measures appropriate to
+          the Service, including authenticated administrator access and
           time-limited upload links. No method of transmission or storage is
           completely secure.
         </p>
@@ -151,8 +151,8 @@ export default function PrivacyPage() {
           7. Your choices and requests
         </h2>
         <p>
-          For access, correction, deletion, or other privacy requests related
-          to the Service, contact{" "}
+          For access, correction, deletion, or other privacy requests related to
+          the Service, contact{" "}
           <a
             className="underline underline-offset-2"
             href={`mailto:${PUBLISHER_CONTACT_EMAIL}`}
@@ -202,5 +202,5 @@ export default function PrivacyPage() {
         </p>
       </section>
     </SiteInfoShell>
-  )
+  );
 }

@@ -1,12 +1,15 @@
-"use client"
+"use client";
 
+import { UploadFile, useFileProviderContext } from "@/app/fileprovider";
+import { cn } from "@/lib/utils";
+import { useLiveUploadPercent } from "@/lib/upload";
 import {
-  UploadFile,
-  useFileProviderContext,
-} from "@/app/fileprovider"
-import { cn } from "@/lib/utils"
-import { useLiveUploadPercent } from "@/lib/upload"
-import { CircleCheck, FileText, Loader2, Trash2Icon, TriangleAlert } from "lucide-react"
+  CircleCheck,
+  FileText,
+  Loader2,
+  Trash2Icon,
+  TriangleAlert,
+} from "lucide-react";
 import {
   Attachment,
   AttachmentAction,
@@ -15,20 +18,20 @@ import {
   AttachmentDescription,
   AttachmentMedia,
   AttachmentTitle,
-} from "@/components/ui/attachment"
+} from "@/components/ui/attachment";
 
 interface FileDisplayProps {
-  className?: string
-  file: UploadFile | null
+  className?: string;
+  file: UploadFile | null;
 }
 
 function formatFileSize(bytes: number | undefined): string {
-  if (!bytes) return "Parse error"
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (!bytes) return "Parse error";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 export default function FileDisplay({
@@ -42,17 +45,17 @@ export default function FileDisplay({
     isUploading,
     uploadError,
     uploadResult,
-  } = useFileProviderContext()
-  const percent = useLiveUploadPercent()
+  } = useFileProviderContext();
+  const percent = useLiveUploadPercent();
 
   const removeFile = () => {
-    if (isUploading) return
-    setFiles(null)
-    setUploadError(null)
-    setUploadResult(null)
-  }
+    if (isUploading) return;
+    setFiles(null);
+    setUploadError(null);
+    setUploadResult(null);
+  };
 
-  const fileName = file?.file.name ?? "File Upload Error"
+  const fileName = file?.file.name ?? "File Upload Error";
 
   const state = !file
     ? "error"
@@ -62,7 +65,7 @@ export default function FileDisplay({
         ? "error"
         : uploadResult
           ? "done"
-          : "idle"
+          : "idle";
 
   const description = !file
     ? "Please remove the file and try again"
@@ -72,16 +75,13 @@ export default function FileDisplay({
         ? uploadError
         : uploadResult
           ? "Upload complete — thank you for sharing"
-          : formatFileSize(file.file.size)
+          : formatFileSize(file.file.size);
 
   return (
     <Attachment
       size="default"
       state={state}
-      className={cn(
-        "min-w-0 flex-nowrap overflow-hidden",
-        className
-      )}
+      className={cn("min-w-0 flex-nowrap overflow-hidden", className)}
     >
       <AttachmentMedia>
         {isUploading ? (
@@ -109,5 +109,5 @@ export default function FileDisplay({
         </AttachmentActions>
       ) : null}
     </Attachment>
-  )
+  );
 }

@@ -1,51 +1,51 @@
-"use client"
-import Image from "next/image"
-import Link from "next/link"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { format } from "date-fns"
-import { Check, LinkIcon, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { Combobox } from "@/components/ui/combobox"
-import { Toaster } from "@/components/ui/sonner"
-import SettingsCard from "@/components/settingsCard"
-import DatePicker from "@/components/datePicker"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
-import type { AppConfig } from "@/lib/appConfig"
-import { toast } from "sonner"
+"use client";
+import Image from "next/image";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
+import { Check, LinkIcon, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Combobox } from "@/components/ui/combobox";
+import { Toaster } from "@/components/ui/sonner";
+import SettingsCard from "@/components/settingsCard";
+import DatePicker from "@/components/datePicker";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import type { AppConfig } from "@/lib/appConfig";
+import { toast } from "sonner";
 
 type ConnectionStatus = {
-  connected: boolean
-  username: string | null
-  siteId?: string | null
-  siteUrl?: string | null
-  siteName?: string | null
-  writeAccess?: boolean
-  error?: string
-  tokenStorage?: string
-}
+  connected: boolean;
+  username: string | null;
+  siteId?: string | null;
+  siteUrl?: string | null;
+  siteName?: string | null;
+  writeAccess?: boolean;
+  error?: string;
+  tokenStorage?: string;
+};
 
-type LinkState = "scheduled" | "provisioning" | "pending" | "used"
+type LinkState = "scheduled" | "provisioning" | "pending" | "used";
 
 type UploadLink = {
-  token: string
-  url: string
-  createdAt: number
-  usedAt: number | null
-  state: LinkState
-  childName: string | null
-  edc: string | null
-  scheduledDate: string | null
-}
+  token: string;
+  url: string;
+  createdAt: number;
+  usedAt: number | null;
+  state: LinkState;
+  childName: string | null;
+  edc: string | null;
+  scheduledDate: string | null;
+};
 
 const STATE_BADGE: Record<LinkState, { label: string; dot: string }> = {
   scheduled: { label: "Scheduled", dot: "bg-teal-600" },
   provisioning: { label: "Provisioning", dot: "bg-amber-500" },
   pending: { label: "Pending Upload", dot: "bg-blue-500" },
   used: { label: "Used", dot: "bg-neutral-400" },
-}
+};
 
 function LinkStatusBadge({
   state,
@@ -57,181 +57,183 @@ function LinkStatusBadge({
         <Check className="size-3.5" />
         Copied
       </span>
-    )
+    );
   }
 
-  const { label, dot } = STATE_BADGE[state]
+  const { label, dot } = STATE_BADGE[state];
   return (
     <span className="flex items-center gap-1.5">
       <span className={`inline-block size-2 rounded-full ${dot}`} />
       {label}
     </span>
-  )
+  );
 }
 
 type ReferenceChild = {
-  name: string
-  edc: string | null
-}
+  name: string;
+  edc: string | null;
+};
 
 export default function ConsolePage() {
-  const [status, setStatus] = useState<ConnectionStatus | null>(null)
-  const [links, setLinks] = useState<UploadLink[]>([])
-  const [isDisconnecting, setIsDisconnecting] = useState(false)
-  const [isConnectingSite, setIsConnectingSite] = useState(false)
-  const [siteUrlInput, setSiteUrlInput] = useState("")
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [copiedToken, setCopiedToken] = useState<string | null>(null)
-  const [children, setChildren] = useState<ReferenceChild[]>([])
-  const [childNamesLoading, setChildNamesLoading] = useState(false)
-  const [childNamesError, setChildNamesError] = useState<string | null>(null)
-  const [selectedChild, setSelectedChild] = useState<string | null>(null)
-  const [selectedEdc, setSelectedEdc] = useState<string | null>(null)
-  const [isSchedulingLetter, setIsSchedulingLetter] = useState(false)
+  const [status, setStatus] = useState<ConnectionStatus | null>(null);
+  const [links, setLinks] = useState<UploadLink[]>([]);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isConnectingSite, setIsConnectingSite] = useState(false);
+  const [siteUrlInput, setSiteUrlInput] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [children, setChildren] = useState<ReferenceChild[]>([]);
+  const [childNamesLoading, setChildNamesLoading] = useState(false);
+  const [childNamesError, setChildNamesError] = useState<string | null>(null);
+  const [selectedChild, setSelectedChild] = useState<string | null>(null);
+  const [selectedEdc, setSelectedEdc] = useState<string | null>(null);
+  const [isSchedulingLetter, setIsSchedulingLetter] = useState(false);
   const [letterScheduleDate, setLetterScheduleDate] = useState<
     Date | undefined
-  >(undefined)
-  const [allowedAdminEmails, setAllowedAdminEmails] = useState<string[]>([])
+  >(undefined);
+  const [allowedAdminEmails, setAllowedAdminEmails] = useState<string[]>([]);
   const [uploadNotificationEmails, setUploadNotificationEmails] = useState<
     string[]
-  >([])
-  const [notificationSaving, setNotificationSaving] = useState(false)
+  >([]);
+  const [notificationSaving, setNotificationSaving] = useState(false);
 
   const loadStatus = useCallback(() => {
     void fetch("/api/auth/onedrive/status")
       .then((res) => res.json())
       .then((data: ConnectionStatus) => setStatus(data))
-      .catch(() => setStatus({ connected: false, username: null }))
-  }, [])
+      .catch(() => setStatus({ connected: false, username: null }));
+  }, []);
 
   const loadLinks = useCallback(() => {
     void fetch("/api/links")
       .then((res) => res.json())
       .then((data: { links?: UploadLink[]; error?: string }) => {
-        setLinks(data.links ?? [])
+        setLinks(data.links ?? []);
         if (data.error) {
-          toast.error(data.error)
+          toast.error(data.error);
         }
       })
-      .catch(() => setLinks([]))
-  }, [])
+      .catch(() => setLinks([]));
+  }, []);
 
   const loadConfig = useCallback(() => {
     void fetch("/api/config")
       .then(async (res) => {
-        const data = (await res.json()) as AppConfig & { error?: string }
+        const data = (await res.json()) as AppConfig & { error?: string };
         if (!res.ok) {
-          throw new Error(data.error ?? "Could not load settings")
+          throw new Error(data.error ?? "Could not load settings");
         }
-        setAllowedAdminEmails(data.allowedAdminEmails ?? [])
-        setUploadNotificationEmails(data.uploadNotificationEmails ?? [])
+        setAllowedAdminEmails(data.allowedAdminEmails ?? []);
+        setUploadNotificationEmails(data.uploadNotificationEmails ?? []);
       })
       .catch(() => {
-        setAllowedAdminEmails([])
-        setUploadNotificationEmails([])
-      })
-  }, [])
+        setAllowedAdminEmails([]);
+        setUploadNotificationEmails([]);
+      });
+  }, []);
 
   const saveNotificationEmails = useCallback(
     async (emails: string[]) => {
       const next = [
-        ...new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean)),
-      ]
-      const previous = uploadNotificationEmails
+        ...new Set(
+          emails.map((email) => email.trim().toLowerCase()).filter(Boolean)
+        ),
+      ];
+      const previous = uploadNotificationEmails;
       const same =
         next.length === previous.length &&
-        next.every((email, index) => email === previous[index])
-      if (same) return
+        next.every((email, index) => email === previous[index]);
+      if (same) return;
 
-      setUploadNotificationEmails(next)
-      setNotificationSaving(true)
-      const savingToast = toast.loading("Saving notification emails...")
+      setUploadNotificationEmails(next);
+      setNotificationSaving(true);
+      const savingToast = toast.loading("Saving notification emails...");
       try {
         const res = await fetch("/api/config", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ uploadNotificationEmails: next }),
-        })
-        const data = (await res.json()) as AppConfig & { error?: string }
+        });
+        const data = (await res.json()) as AppConfig & { error?: string };
         if (!res.ok) {
-          throw new Error(data.error ?? "Could not save notification emails")
+          throw new Error(data.error ?? "Could not save notification emails");
         }
-        setAllowedAdminEmails(data.allowedAdminEmails ?? [])
-        setUploadNotificationEmails(data.uploadNotificationEmails ?? [])
-        toast.success("Notification emails saved.", { id: savingToast })
+        setAllowedAdminEmails(data.allowedAdminEmails ?? []);
+        setUploadNotificationEmails(data.uploadNotificationEmails ?? []);
+        toast.success("Notification emails saved.", { id: savingToast });
       } catch (error) {
-        setUploadNotificationEmails(previous)
+        setUploadNotificationEmails(previous);
         toast.error(
           error instanceof Error
             ? error.message
             : "Could not save notification emails",
           { id: savingToast }
-        )
+        );
       } finally {
-        setNotificationSaving(false)
+        setNotificationSaving(false);
       }
     },
     [uploadNotificationEmails]
-  )
+  );
 
   const loadChildNames = useCallback(() => {
-    setChildNamesLoading(true)
-    setChildNamesError(null)
+    setChildNamesLoading(true);
+    setChildNamesError(null);
     void fetch("/api/onedrive/child-names")
       .then(async (res) => {
         const data = (await res.json()) as {
-          children?: ReferenceChild[]
-          names?: string[]
-          error?: string
-        }
+          children?: ReferenceChild[];
+          names?: string[];
+          error?: string;
+        };
         if (!res.ok) {
-          throw new Error(data.error ?? "Could not load child names")
+          throw new Error(data.error ?? "Could not load child names");
         }
         const nextChildren =
           data.children ??
-          (data.names ?? []).map((name) => ({ name, edc: null }))
-        setChildren(nextChildren)
+          (data.names ?? []).map((name) => ({ name, edc: null }));
+        setChildren(nextChildren);
         setSelectedChild((current) =>
           current && nextChildren.some((child) => child.name === current)
             ? current
             : null
-        )
+        );
       })
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : "Could not load child names"
-        setChildren([])
-        setSelectedChild(null)
-        setChildNamesError(message)
+          error instanceof Error ? error.message : "Could not load child names";
+        setChildren([]);
+        setSelectedChild(null);
+        setChildNamesError(message);
       })
-      .finally(() => setChildNamesLoading(false))
-  }, [])
+      .finally(() => setChildNamesLoading(false));
+  }, []);
 
   useEffect(() => {
-    loadStatus()
-    loadLinks()
-    loadConfig()
+    loadStatus();
+    loadLinks();
+    loadConfig();
 
     // Poll so link states (Provisioning -> Pending Upload -> Used) stay
     // current without a manual refresh.
-    const interval = window.setInterval(loadLinks, 15000)
+    const interval = window.setInterval(loadLinks, 15000);
 
-    const params = new URLSearchParams(window.location.search)
-    const connectedParam = params.get("connected") === "1"
-    const grantedParam = params.get("granted") === "1"
-    const errorParam = params.get("error")
-    let bannerTimeout: number | undefined
+    const params = new URLSearchParams(window.location.search);
+    const connectedParam = params.get("connected") === "1";
+    const grantedParam = params.get("granted") === "1";
+    const errorParam = params.get("error");
+    let bannerTimeout: number | undefined;
     if (connectedParam || grantedParam || errorParam) {
       bannerTimeout = window.setTimeout(() => {
         if (grantedParam) {
           toast.success(
             "App write access granted on the SharePoint site. Uploads should work now."
-          )
-          loadStatus()
+          );
+          loadStatus();
         } else if (connectedParam) {
           toast.success(
             "SharePoint site connected and ready to receive uploads."
-          )
+          );
         } else if (errorParam) {
           const setupErrors: Record<string, string> = {
             unauthorized_admin:
@@ -244,103 +246,105 @@ export default function ConsolePage() {
               "Connect a SharePoint site from this page instead of signing in a personal OneDrive account.",
             site_not_connected:
               "Connect a SharePoint site first, then grant write access.",
-          }
-          toast.error(setupErrors[errorParam] ?? errorParam)
+          };
+          toast.error(setupErrors[errorParam] ?? errorParam);
         }
-      }, 0)
+      }, 0);
     }
 
     return () => {
-      window.clearInterval(interval)
+      window.clearInterval(interval);
       if (bannerTimeout !== undefined) {
-        window.clearTimeout(bannerTimeout)
+        window.clearTimeout(bannerTimeout);
       }
-    }
-  }, [loadStatus, loadLinks, loadConfig])
+    };
+  }, [loadStatus, loadLinks, loadConfig]);
 
   const portalLinkUrl = useCallback((token: string) => {
-    return `${window.location.origin}/portalaccess/${encodeURIComponent(token)}`
-  }, [])
+    return `${window.location.origin}/portalaccess/${encodeURIComponent(token)}`;
+  }, []);
 
   const copyLink = useCallback(
     async (link: UploadLink) => {
       try {
-        await navigator.clipboard.writeText(portalLinkUrl(link.token))
-        setCopiedToken(link.token)
+        await navigator.clipboard.writeText(portalLinkUrl(link.token));
+        setCopiedToken(link.token);
         window.setTimeout(() => {
-          setCopiedToken((current) => (current === link.token ? null : current))
-        }, 2000)
+          setCopiedToken((current) =>
+            current === link.token ? null : current
+          );
+        }, 2000);
       } catch {
-        toast.error("Could not copy to clipboard")
+        toast.error("Could not copy to clipboard");
       }
     },
     [portalLinkUrl]
-  )
+  );
 
   const removeLink = useCallback(
     async (token: string) => {
-      setLinks((prev) => prev.filter((link) => link.token !== token))
+      setLinks((prev) => prev.filter((link) => link.token !== token));
       try {
         await fetch("/api/links", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token }),
-        })
+        });
       } catch {
-        loadLinks()
+        loadLinks();
       }
     },
     [loadLinks]
-  )
+  );
 
   const requestRemoveLink = useCallback(
     (link: UploadLink) => {
       if (link.state !== "used") {
         const confirmed = window.confirm(
           "Are you sure you want to delete this unused link? Anyone with the link will no longer be able to upload."
-        )
-        if (!confirmed) return
+        );
+        if (!confirmed) return;
       }
-      void removeLink(link.token)
+      void removeLink(link.token);
     },
     [removeLink]
-  )
+  );
 
   const disconnect = useCallback(() => {
-    setIsDisconnecting(true)
+    setIsDisconnecting(true);
     void fetch("/api/auth/onedrive/status", { method: "DELETE" })
       .then(() => {
-        setStatus({ connected: false, username: null })
-        setSiteUrlInput("")
-        toast.success("SharePoint site disconnected.")
-        setChildren([])
-        setSelectedChild(null)
-        setSelectedEdc(null)
-        setIsSchedulingLetter(false)
-        setLetterScheduleDate(undefined)
-        setChildNamesError(null)
+        setStatus({ connected: false, username: null });
+        setSiteUrlInput("");
+        toast.success("SharePoint site disconnected.");
+        setChildren([]);
+        setSelectedChild(null);
+        setSelectedEdc(null);
+        setIsSchedulingLetter(false);
+        setLetterScheduleDate(undefined);
+        setChildNamesError(null);
       })
-      .finally(() => setIsDisconnecting(false))
-  }, [])
+      .finally(() => setIsDisconnecting(false));
+  }, []);
 
   const connectSite = useCallback(async () => {
-    const siteUrl = siteUrlInput.trim()
+    const siteUrl = siteUrlInput.trim();
     if (!siteUrl) {
-      toast.error("Enter a SharePoint site URL (or Graph site id) first.")
-      return
+      toast.error("Enter a SharePoint site URL (or Graph site id) first.");
+      return;
     }
 
-    setIsConnectingSite(true)
-    const connectingToast = toast.loading("Connecting SharePoint site...")
+    setIsConnectingSite(true);
+    const connectingToast = toast.loading("Connecting SharePoint site...");
     try {
       const res = await fetch("/api/sharepoint/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ siteUrl }),
-      })
-      const data = (await res.json()) as ConnectionStatus & { error?: string }
+      });
+      const data = (await res.json()) as ConnectionStatus & { error?: string };
       if (!res.ok) {
-        throw new Error(data.error ?? "Could not connect SharePoint site")
+        throw new Error(data.error ?? "Could not connect SharePoint site");
       }
       setStatus({
         connected: true,
@@ -348,49 +352,53 @@ export default function ConsolePage() {
         siteId: data.siteId,
         siteUrl: data.siteUrl,
         siteName: data.siteName,
-      })
+      });
       toast.success(
         "SharePoint site connected. Next: grant write access if prompted.",
         { id: connectingToast }
-      )
-      loadStatus()
-      loadChildNames()
+      );
+      loadStatus();
+      loadChildNames();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Could not connect SharePoint site"
-      toast.error(message, { id: connectingToast })
+        error instanceof Error
+          ? error.message
+          : "Could not connect SharePoint site";
+      toast.error(message, { id: connectingToast });
     } finally {
-      setIsConnectingSite(false)
+      setIsConnectingSite(false);
     }
-  }, [loadChildNames, siteUrlInput])
+  }, [loadChildNames, siteUrlInput]);
 
-  const connected = Boolean(status?.connected)
+  const connected = Boolean(status?.connected);
 
   const notificationEmailItems = useMemo(() => {
-    const emails = new Set(allowedAdminEmails)
-    const extras = uploadNotificationEmails.filter((email) => !emails.has(email))
+    const emails = new Set(allowedAdminEmails);
+    const extras = uploadNotificationEmails.filter(
+      (email) => !emails.has(email)
+    );
     return [...extras, ...allowedAdminEmails].map((email) => ({
       label: email,
       value: email,
-    }))
-  }, [allowedAdminEmails, uploadNotificationEmails])
+    }));
+  }, [allowedAdminEmails, uploadNotificationEmails]);
 
   useEffect(() => {
-    if (!connected) return
+    if (!connected) return;
     const timeout = window.setTimeout(() => {
-      loadChildNames()
-    }, 0)
-    return () => window.clearTimeout(timeout)
-  }, [connected, loadChildNames])
+      loadChildNames();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [connected, loadChildNames]);
 
   const workbookEdc =
-    children.find((child) => child.name === selectedChild)?.edc ?? null
+    children.find((child) => child.name === selectedChild)?.edc ?? null;
 
-  let edcStatement: string | null = null
+  let edcStatement: string | null = null;
   if (selectedChild && workbookEdc) {
-    edcStatement = `EDC on file for ${selectedChild}: ${workbookEdc}. Age in weeks will be calculated from this EDC to the date the parent records on upload.`
+    edcStatement = `EDC on file for ${selectedChild}: ${workbookEdc}. Age in weeks will be calculated from this EDC to the date the parent records on upload.`;
   } else if (selectedChild) {
-    edcStatement = `No EDC on file for ${selectedChild}. Enter one below to generate a link.`
+    edcStatement = `No EDC on file for ${selectedChild}. Enter one below to generate a link.`;
   }
 
   const childItems = useMemo(
@@ -400,39 +408,38 @@ export default function ConsolePage() {
         value: child.name,
       })),
     [children]
-  )
+  );
 
   const applyChildSelection = (value: string | null) => {
     if (!value) {
-      setSelectedChild(null)
-      setSelectedEdc(null)
-      return
+      setSelectedChild(null);
+      setSelectedEdc(null);
+      return;
     }
-    const nextEdc =
-      children.find((child) => child.name === value)?.edc ?? null
-    setSelectedChild(value)
-    setSelectedEdc(nextEdc)
-  }
+    const nextEdc = children.find((child) => child.name === value)?.edc ?? null;
+    setSelectedChild(value);
+    setSelectedEdc(nextEdc);
+  };
 
   const generateLink = useCallback(() => {
     if (!selectedChild || !selectedEdc) {
       toast.error(
         "Select a child with a valid EDC date before generating a link."
-      )
-      return
+      );
+      return;
     }
 
     if (isSchedulingLetter && !letterScheduleDate) {
-      toast.error("Pick the letter schedule date before generating a link.")
-      return
+      toast.error("Pick the letter schedule date before generating a link.");
+      return;
     }
 
     const scheduledDate = isSchedulingLetter
       ? format(letterScheduleDate!, "yyyy-MM-dd")
-      : null
+      : null;
 
-    setIsGenerating(true)
-    const generatingToast = toast.loading("Generating link...")
+    setIsGenerating(true);
+    const generatingToast = toast.loading("Generating link...");
     void fetch("/api/generate-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -444,34 +451,34 @@ export default function ConsolePage() {
     })
       .then(async (res) => {
         const data = (await res.json()) as UploadLink & {
-          error?: string
-        }
+          error?: string;
+        };
         if (!res.ok) {
-          throw new Error(data.error ?? "Could not generate link")
+          throw new Error(data.error ?? "Could not generate link");
         }
-        loadLinks()
-        toast.success("Link generated.", { id: generatingToast })
+        loadLinks();
+        toast.success("Link generated.", { id: generatingToast });
       })
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : "Could not generate link"
-        toast.error(message, { id: generatingToast })
+          error instanceof Error ? error.message : "Could not generate link";
+        toast.error(message, { id: generatingToast });
       })
-      .finally(() => setIsGenerating(false))
+      .finally(() => setIsGenerating(false));
   }, [
     isSchedulingLetter,
     letterScheduleDate,
     loadLinks,
     selectedChild,
     selectedEdc,
-  ])
+  ]);
 
   const canGenerateLink =
     connected &&
     Boolean(selectedChild) &&
     Boolean(selectedEdc) &&
     (!isSchedulingLetter || Boolean(letterScheduleDate)) &&
-    !isGenerating
+    !isGenerating;
 
   const childPickerContent = (() => {
     if (!connected) {
@@ -480,22 +487,22 @@ export default function ConsolePage() {
           Connect a SharePoint site to load children from the reference
           workbook.
         </p>
-      )
+      );
     }
     if (childNamesLoading) {
       return (
         <p className="text-sm text-black/50">Loading children from workbook…</p>
-      )
+      );
     }
     if (childNamesError) {
-      return <p className="text-sm text-red-600">{childNamesError}</p>
+      return <p className="text-sm text-red-600">{childNamesError}</p>;
     }
     if (childItems.length === 0) {
       return (
         <p className="text-sm text-black/50">
           No names found in the configured child name column. Check Settings.
         </p>
-      )
+      );
     }
     return (
       <>
@@ -522,7 +529,7 @@ export default function ConsolePage() {
               type="date"
               value={selectedEdc ?? ""}
               onChange={(event) => {
-                setSelectedEdc(event.target.value || null)
+                setSelectedEdc(event.target.value || null);
               }}
             />
             <p className="text-xs text-black/50">
@@ -538,10 +545,10 @@ export default function ConsolePage() {
                 id="schedule-letter"
                 checked={isSchedulingLetter}
                 onCheckedChange={(checked) => {
-                  const scheduling = checked === true
-                  setIsSchedulingLetter(scheduling)
+                  const scheduling = checked === true;
+                  setIsSchedulingLetter(scheduling);
                   if (!scheduling) {
-                    setLetterScheduleDate(undefined)
+                    setLetterScheduleDate(undefined);
                   }
                 }}
               />
@@ -558,16 +565,16 @@ export default function ConsolePage() {
                   setDate={setLetterScheduleDate}
                 />
                 <p className="text-xs text-black/50">
-                  The portal link stays unavailable until this date. On that
-                  day the activation buffer begins.
+                  The portal link stays unavailable until this date. On that day
+                  the activation buffer begins.
                 </p>
               </div>
             ) : null}
           </div>
         ) : null}
       </>
-    )
-  })()
+    );
+  })();
 
   return (
     <div className="flex min-h-dvh w-full flex-col bg-white text-black lg:h-dvh lg:max-h-dvh lg:overflow-hidden">
@@ -592,7 +599,7 @@ export default function ConsolePage() {
           size="sm"
           className="shrink-0"
           onClick={() => {
-            window.location.assign("/api/auth/admin/logout")
+            window.location.assign("/api/auth/admin/logout");
           }}
         >
           Sign out
@@ -652,8 +659,8 @@ export default function ConsolePage() {
             {connected && status?.writeAccess !== true ? (
               <p className="mt-2 text-xs text-amber-700">
                 Site is connected, but the app cannot write yet. Click Grant
-                write access (requires Entra delegated Sites.FullControl.All +
-                a SharePoint/Global admin).
+                write access (requires Entra delegated Sites.FullControl.All + a
+                SharePoint/Global admin).
               </p>
             ) : null}
 
@@ -663,10 +670,12 @@ export default function ConsolePage() {
                   size="sm"
                   disabled={isConnectingSite}
                   onClick={() => {
-                    void connectSite()
+                    void connectSite();
                   }}
                 >
-                  {isConnectingSite ? "Connecting..." : "Connect SharePoint site"}
+                  {isConnectingSite
+                    ? "Connecting..."
+                    : "Connect SharePoint site"}
                 </Button>
               ) : (
                 <>
@@ -676,7 +685,7 @@ export default function ConsolePage() {
                       onClick={() => {
                         window.location.assign(
                           "/api/auth/sharepoint/grant-access"
-                        )
+                        );
                       }}
                     >
                       Grant write access
@@ -704,7 +713,7 @@ export default function ConsolePage() {
                 items={notificationEmailItems}
                 value={uploadNotificationEmails}
                 onValueChange={(emails) => {
-                  void saveNotificationEmails(emails)
+                  void saveNotificationEmails(emails);
                 }}
                 placeholder="Search or select emails"
                 emptyText="No matching emails."
@@ -738,8 +747,8 @@ export default function ConsolePage() {
               ) : (
                 <ul className="flex flex-col gap-2">
                   {links.map((link) => {
-                    const isCopied = copiedToken === link.token
-                    const isUsed = link.state === "used"
+                    const isCopied = copiedToken === link.token;
+                    const isUsed = link.state === "used";
                     const body = (
                       <>
                         <span className="flex items-center justify-between text-xs text-black/50">
@@ -770,7 +779,7 @@ export default function ConsolePage() {
                           </span>
                         )}
                       </>
-                    )
+                    );
                     return (
                       <li key={link.token} className="flex items-stretch gap-2">
                         {isUsed ? (
@@ -798,7 +807,7 @@ export default function ConsolePage() {
                           <X className="size-4" />
                         </button>
                       </li>
-                    )
+                    );
                   })}
                 </ul>
               )}
@@ -823,13 +832,13 @@ export default function ConsolePage() {
           <SettingsCard
             connected={connected}
             onConfigSaved={() => {
-              loadChildNames()
-              loadConfig()
+              loadChildNames();
+              loadConfig();
             }}
           />
         </div>
       </main>
       <Toaster position="bottom-right" richColors closeButton />
     </div>
-  )
+  );
 }

@@ -1,18 +1,18 @@
-import type { Metadata } from "next"
-import Link from "next/link"
-import SiteInfoShell from "@/components/siteInfoShell"
+import type { Metadata } from "next";
+import Link from "next/link";
+import SiteInfoShell from "@/components/siteInfoShell";
 import {
   APP_DISPLAY_NAME,
   APP_SHORT_NAME,
   LEGAL_EFFECTIVE_DATE,
   PUBLISHER_CONTACT_EMAIL,
   PUBLISHER_NAME,
-} from "@/lib/publisher"
+} from "@/lib/publisher";
 
 export const metadata: Metadata = {
   title: `${APP_SHORT_NAME} — Terms of Service`,
   description: `Terms of Service for ${APP_DISPLAY_NAME}.`,
-}
+};
 
 export default function TermsOfServicePage() {
   return (
@@ -31,15 +31,17 @@ export default function TermsOfServicePage() {
       <section className="space-y-3">
         <h2 className="font-heading text-xl font-medium">1. The Service</h2>
         <p>
-          The Service provides time-limited video upload links and related
-          tools so families can share General Movements Assessment (GMA)
-          videos with clinic staff, and so authorized administrators can
-          connect a Microsoft OneDrive destination and manage portal settings.
+          The Service provides time-limited video upload links and related tools
+          so families can share General Movements Assessment (GMA) videos with
+          clinic staff, and so authorized administrators can connect a Microsoft
+          OneDrive destination and manage portal settings.
         </p>
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-heading text-xl font-medium">2. Eligibility &amp; accounts</h2>
+        <h2 className="font-heading text-xl font-medium">
+          2. Eligibility &amp; accounts
+        </h2>
         <ul className="list-disc space-y-2 pl-5">
           <li>
             Families may use an upload link only if they received a valid,
@@ -80,7 +82,9 @@ export default function TermsOfServicePage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-heading text-xl font-medium">4. Uploaded content</h2>
+        <h2 className="font-heading text-xl font-medium">
+          4. Uploaded content
+        </h2>
         <p>
           Uploaders retain any rights they have in submitted videos and form
           information, and grant the clinic program and us a limited right to
@@ -108,10 +112,9 @@ export default function TermsOfServicePage() {
           6. No medical advice
         </h2>
         <p>
-          The Service is a technical upload and administration tool. It does
-          not provide medical advice, diagnosis, or treatment. Assessment
-          decisions are made by qualified clinicians, not by the software
-          publisher.
+          The Service is a technical upload and administration tool. It does not
+          provide medical advice, diagnosis, or treatment. Assessment decisions
+          are made by qualified clinicians, not by the software publisher.
         </p>
       </section>
 
@@ -120,10 +123,10 @@ export default function TermsOfServicePage() {
           7. Disclaimer of warranties
         </h2>
         <p>
-          The Service is provided &quot;as is&quot; and &quot;as
-          available&quot; without warranties of any kind, whether express or
-          implied, including merchantability, fitness for a particular purpose,
-          and non-infringement, to the maximum extent permitted by law.
+          The Service is provided &quot;as is&quot; and &quot;as available&quot;
+          without warranties of any kind, whether express or implied, including
+          merchantability, fitness for a particular purpose, and
+          non-infringement, to the maximum extent permitted by law.
         </p>
       </section>
 
@@ -184,5 +187,5 @@ export default function TermsOfServicePage() {
         </p>
       </section>
     </SiteInfoShell>
-  )
+  );
 }

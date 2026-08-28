@@ -1,18 +1,18 @@
-import type { Metadata } from "next"
-import Link from "next/link"
-import SiteInfoShell from "@/components/siteInfoShell"
+import type { Metadata } from "next";
+import Link from "next/link";
+import SiteInfoShell from "@/components/siteInfoShell";
 import {
   APP_DISPLAY_NAME,
   APP_SHORT_NAME,
   PUBLISHER_CONTACT_EMAIL,
   PUBLISHER_NAME,
-} from "@/lib/publisher"
+} from "@/lib/publisher";
 
 export const metadata: Metadata = {
   title: `${APP_SHORT_NAME} — Home`,
   description:
     "Official information site for the DDAGMA GMA video upload portal used by the Vancouver Infant Development Program.",
-}
+};
 
 export default function InfoHomePage() {
   return (
@@ -27,9 +27,7 @@ export default function InfoHomePage() {
       <section className="space-y-3">
         <h2 className="font-heading text-xl font-medium">What the app does</h2>
         <ul className="list-disc space-y-2 pl-5">
-          <li>
-            Clinic staff create time-limited upload links for families.
-          </li>
+          <li>Clinic staff create time-limited upload links for families.</li>
           <li>
             Families upload a GMA video and related child information through
             the portal.
@@ -87,5 +85,5 @@ export default function InfoHomePage() {
         </p>
       </section>
     </SiteInfoShell>
-  )
+  );
 }

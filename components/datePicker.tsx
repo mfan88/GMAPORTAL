@@ -1,34 +1,39 @@
-"use client"
+"use client";
 
-import { cn } from "@/lib/utils"
-import { CalendarIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Calendar } from "@/components/ui/calendar"
+import { cn } from "@/lib/utils";
+import { CalendarIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-} from "@/components/ui/popover"
-import { format } from "date-fns"
-import { useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react"
+} from "@/components/ui/popover";
+import { format } from "date-fns";
+import {
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 
 interface DateProps {
-  date: Date | undefined
-  setDate: Dispatch<SetStateAction<Date | undefined>>
-  className?: string
+  date: Date | undefined;
+  setDate: Dispatch<SetStateAction<Date | undefined>>;
+  className?: string;
 }
 
 function toDateInputValue(date: Date | undefined) {
-  if (!date) return ""
-  return format(date, "yyyy-MM-dd")
+  if (!date) return "";
+  return format(date, "yyyy-MM-dd");
 }
 
 function parseDateInputValue(value: string): Date | undefined {
-  if (!value) return undefined
-  const [year, month, day] = value.split("-").map(Number)
-  if (!year || !month || !day) return undefined
-  const next = new Date(year, month - 1, day)
-  return Number.isNaN(next.getTime()) ? undefined : next
+  if (!value) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return undefined;
+  const next = new Date(year, month - 1, day);
+  return Number.isNaN(next.getTime()) ? undefined : next;
 }
 
 export default function DatePicker({
@@ -36,7 +41,7 @@ export default function DatePicker({
   date,
   setDate,
 }: Readonly<DateProps>) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -66,14 +71,14 @@ export default function DatePicker({
           mode="single"
           selected={date}
           onSelect={(next) => {
-            setDate(next)
-            setOpen(false)
+            setDate(next);
+            setOpen(false);
           }}
           defaultMonth={date}
         />
       </PopoverContent>
     </Popover>
-  )
+  );
 }
 
 /** Native date control — reliable on iOS/Android touch. */
@@ -83,8 +88,8 @@ export function MobileDatePicker({
   setDate,
 }: Readonly<DateProps>) {
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setDate(parseDateInputValue(event.target.value))
-  }
+    setDate(parseDateInputValue(event.target.value));
+  };
 
   return (
     <div className={cn("relative w-full", className)}>
@@ -100,5 +105,5 @@ export function MobileDatePicker({
         )}
       />
     </div>
-  )
+  );
 }

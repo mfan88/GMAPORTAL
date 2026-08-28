@@ -1,61 +1,59 @@
-import type { NextRequest } from "next/server"
-import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import {
-    uploadSmallFileToOneDrive,
-    getOneDriveAccessToken,
-    canAccessUploadPortal,
-    resolvePortalUploadFilename,
-    toRequestShape,
-} from "@/lib/server/index"
+  uploadSmallFileToOneDrive,
+  getOneDriveAccessToken,
+  canAccessUploadPortal,
+  resolvePortalUploadFilename,
+  toRequestShape,
+} from "@/lib/server/index";
 
-export const dynamic = "force-dynamic"
+export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-    const shaped = toRequestShape(request)
-    const access = await canAccessUploadPortal(shaped)
-    if (!access.allowed) {
-        return NextResponse.json(
-            {
-                error: "Upload access required. Use a parent link or sign in with the receiving OneDrive account.",
-            },
-            { status: 401 }
-        )
+  const shaped = toRequestShape(request);
+  const access = await canAccessUploadPortal(shaped);
+  if (!access.allowed) {
+    return NextResponse.json(
+      {
+        error:
+          "Upload access required. Use a parent link or sign in with the receiving OneDrive account.",
+      },
+      { status: 401 }
+    );
+  }
+
+  try {
+    const formData = await request.formData();
+    const file = formData.get("file");
+    const dateRecorded = formData.get("dateRecorded");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+    if (typeof dateRecorded !== "string" || !dateRecorded.trim()) {
+      return NextResponse.json(
+        { error: "Date recorded is required" },
+        { status: 400 }
+      );
     }
 
-    try {
-        const formData = await request.formData()
-        const file = formData.get("file")
-        const dateRecorded = formData.get("dateRecorded")
+    const filename = await resolvePortalUploadFilename(
+      shaped,
+      dateRecorded,
+      file.name
+    );
+    const namedFile = new File([file], filename, {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
 
-        if (!(file instanceof File)) {
-            return NextResponse.json(
-                { error: "No file provided" },
-                { status: 400 }
-            )
-        }
-        if (typeof dateRecorded !== "string" || !dateRecorded.trim()) {
-            return NextResponse.json(
-                { error: "Date recorded is required" },
-                { status: 400 }
-            )
-        }
+    const accessToken = await getOneDriveAccessToken();
+    const result = await uploadSmallFileToOneDrive(namedFile, accessToken);
 
-        const filename = await resolvePortalUploadFilename(
-            shaped,
-            dateRecorded,
-            file.name
-        )
-        const namedFile = new File([file], filename, {
-            type: file.type,
-            lastModified: file.lastModified,
-        })
-
-        const accessToken = await getOneDriveAccessToken()
-        const result = await uploadSmallFileToOneDrive(namedFile, accessToken)
-
-        return NextResponse.json(result)
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "Upload failed"
-        return NextResponse.json({ error: message }, { status: 500 })
-    }
+    return NextResponse.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Upload failed";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

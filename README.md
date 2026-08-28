@@ -35,14 +35,14 @@ Collecting assessment videos is usually slow and messy: large files bounce off e
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| App | [Next.js](https://nextjs.org/) (App Router) + TypeScript + React |
-| UI | Tailwind CSS + [shadcn/ui](https://ui.shadcn.com/) |
-| Identity | Microsoft Entra ID (work/school accounts) |
-| File destination | Microsoft Graph → OneDrive / SharePoint |
-| Link & settings store | Redis (Upstash) |
-| Email notifications | Azure Communication Services |
+| Layer                 | Choice                                                           |
+| --------------------- | ---------------------------------------------------------------- |
+| App                   | [Next.js](https://nextjs.org/) (App Router) + TypeScript + React |
+| UI                    | Tailwind CSS + [shadcn/ui](https://ui.shadcn.com/)               |
+| Identity              | Microsoft Entra ID (work/school accounts)                        |
+| File destination      | Microsoft Graph → OneDrive / SharePoint                          |
+| Link & settings store | Redis (Upstash)                                                  |
+| Email notifications   | Azure Communication Services                                     |
 
 ## Documentation
 

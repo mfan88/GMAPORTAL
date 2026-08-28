@@ -1,40 +1,40 @@
-"use client"
-import { InfoGroup, MobileInfoGroup } from "@/components/infoGroup"
-import { UploadArea, MobileUploadArea } from "@/components/uploadArea"
-import { useFileProviderContext } from "@/app/fileprovider"
-import { useTheme } from "next-themes"
-import { useEffect } from "react"
-import Image from "next/image"
-import Link from "next/link"
-import { Separator } from "@/components/ui/separator"
-import { format } from "date-fns"
+"use client";
+import { InfoGroup, MobileInfoGroup } from "@/components/infoGroup";
+import { UploadArea, MobileUploadArea } from "@/components/uploadArea";
+import { useFileProviderContext } from "@/app/fileprovider";
+import { useTheme } from "next-themes";
+import { useEffect } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { Separator } from "@/components/ui/separator";
+import { format } from "date-fns";
 
 function formatWindowTime(ms: number) {
-  return format(new Date(ms), "MMM d, yyyy 'at' h:mm a")
+  return format(new Date(ms), "MMM d, yyyy 'at' h:mm a");
 }
 
 function InstructionsText() {
-  const { uploadWindow, linkContextReady } = useFileProviderContext()
+  const { uploadWindow, linkContextReady } = useFileProviderContext();
 
   if (linkContextReady && uploadWindow) {
-    return `Please upload a video between ${formatWindowTime(uploadWindow.availableAt)} and ${formatWindowTime(uploadWindow.expiresAt)}, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.`
+    return `Please upload a video between ${formatWindowTime(uploadWindow.availableAt)} and ${formatWindowTime(uploadWindow.expiresAt)}, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.`;
   }
 
-  return "Please upload a video within the time window on your clinic link, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment."
+  return "Please upload a video within the time window on your clinic link, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.";
 }
 
 export default function Page() {
-  const { setTheme } = useTheme()
+  const { setTheme } = useTheme();
 
   useEffect(() => {
-    setTheme("light")
-  }, [setTheme])
+    setTheme("light");
+  }, [setTheme]);
 
   return (
     <div className="min-h-dvh max-w-dvw bg-white text-black">
       <header className="box-border flex h-[10dvh] max-h-[10dvh] shrink-0 items-center justify-between overflow-hidden px-4 py-2 dark:bg-white">
         <Image
-          className="h-full w-auto max-h-full object-contain"
+          className="h-full max-h-full w-auto object-contain"
           src="/images/dda-logo.svg"
           alt="DDA logo"
           width={1338}
@@ -106,7 +106,6 @@ export default function Page() {
         <section className="mt-5 box-border w-full px-10">
           <MobileUploadArea />
         </section>
-
       </div>
 
       <Link
@@ -116,5 +115,5 @@ export default function Page() {
         Are you an admin?
       </Link>
     </div>
-  )
+  );
 }

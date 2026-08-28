@@ -1,20 +1,20 @@
-import Image from "next/image"
-import Link from "next/link"
-import type { ReactNode } from "react"
-import { PUBLISHER_CONTACT_EMAIL, PUBLISHER_NAME } from "@/lib/publisher"
+import Image from "next/image";
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { PUBLISHER_CONTACT_EMAIL, PUBLISHER_NAME } from "@/lib/publisher";
 
 const navLinks = [
   { href: "/info", label: "Home" },
   { href: "/privacy", label: "Privacy" },
   { href: "/tos", label: "Terms" },
-] as const
+] as const;
 
 export default function SiteInfoShell({
   title,
   children,
 }: {
-  title: string
-  children: ReactNode
+  title: string;
+  children: ReactNode;
 }) {
   return (
     <div className="min-h-screen w-full bg-white text-black">
@@ -75,5 +75,5 @@ export default function SiteInfoShell({
         </p>
       </footer>
     </div>
-  )
+  );
 }

@@ -1,13 +1,13 @@
-import "server-only"
+import "server-only";
 
-import { EmailClient, type EmailMessage } from "@azure/communication-email"
+import { EmailClient, type EmailMessage } from "@azure/communication-email";
 
 export type UploadNotificationInput = {
-  childName: string
-  fileUrl: string
+  childName: string;
+  fileUrl: string;
   /** Microsoft account(s) that should receive the notice (drive owner / admins). */
-  to: string[]
-}
+  to: string[];
+};
 
 function escapeHtml(value: string) {
   return value
@@ -15,18 +15,18 @@ function escapeHtml(value: string) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;")
+    .replaceAll("'", "&#39;");
 }
 
 function getEmailClient(): EmailClient | null {
   const connectionString =
-    process.env.AZURE_COMMUNICATION_SERVICES_CONNECTION_STRING?.trim()
-  if (!connectionString) return null
-  return new EmailClient(connectionString)
+    process.env.AZURE_COMMUNICATION_SERVICES_CONNECTION_STRING?.trim();
+  if (!connectionString) return null;
+  return new EmailClient(connectionString);
 }
 
 function getSenderAddress(): string | null {
-  return process.env.AZURE_EMAIL_SENDER_ADDRESS?.trim() || null
+  return process.env.AZURE_EMAIL_SENDER_ADDRESS?.trim() || null;
 }
 
 /**
@@ -37,59 +37,58 @@ function getSenderAddress(): string | null {
 export async function sendUploadNotificationEmail(
   input: UploadNotificationInput
 ): Promise<{ sent: boolean; skippedReason?: string }> {
-  const childName = input.childName.trim()
-  const fileUrl = input.fileUrl.trim()
+  const childName = input.childName.trim();
+  const fileUrl = input.fileUrl.trim();
   const recipients = [
     ...new Set(
-      input.to
-        .map((address) => address.trim().toLowerCase())
-        .filter(Boolean)
+      input.to.map((address) => address.trim().toLowerCase()).filter(Boolean)
     ),
-  ]
+  ];
 
   if (!childName) {
-    return { sent: false, skippedReason: "Missing child name" }
+    return { sent: false, skippedReason: "Missing child name" };
   }
   if (!fileUrl) {
-    return { sent: false, skippedReason: "Missing file URL" }
+    return { sent: false, skippedReason: "Missing file URL" };
   }
   if (recipients.length === 0) {
-    return { sent: false, skippedReason: "No notification recipients" }
+    return { sent: false, skippedReason: "No notification recipients" };
   }
 
-  const client = getEmailClient()
+  const client = getEmailClient();
   if (!client) {
     return {
       sent: false,
-      skippedReason: "AZURE_COMMUNICATION_SERVICES_CONNECTION_STRING is not set",
-    }
+      skippedReason:
+        "AZURE_COMMUNICATION_SERVICES_CONNECTION_STRING is not set",
+    };
   }
 
-  const senderAddress = getSenderAddress()
+  const senderAddress = getSenderAddress();
   if (!senderAddress) {
     return {
       sent: false,
       skippedReason: "AZURE_EMAIL_SENDER_ADDRESS is not set",
-    }
+    };
   }
 
-  const safeName = escapeHtml(childName)
-  const safeUrl = escapeHtml(fileUrl)
+  const safeName = escapeHtml(childName);
+  const safeUrl = escapeHtml(fileUrl);
 
-  const subject = `${childName}'s parent has uploaded a new video to your OneDrive`
+  const subject = `${childName}'s parent has uploaded a new video to your OneDrive`;
   const plainText = [
     `Hello,`,
     ``,
     `${childName}'s parent has uploaded a new video to your OneDrive.`,
     ``,
     `Open the video: ${fileUrl}`,
-  ].join("\n")
+  ].join("\n");
 
   const html = `
     <p>Hello,</p>
     <p><strong>${safeName}</strong>'s parent has uploaded a new video to your OneDrive.</p>
     <p><a href="${safeUrl}">Open the video</a></p>
-  `.trim()
+  `.trim();
 
   const message: EmailMessage = {
     senderAddress,
@@ -101,9 +100,9 @@ export async function sendUploadNotificationEmail(
     recipients: {
       to: recipients.map((address) => ({ address })),
     },
-  }
+  };
 
-  const poller = await client.beginSend(message)
-  await poller.pollUntilDone()
-  return { sent: true }
+  const poller = await client.beginSend(message);
+  await poller.pollUntilDone();
+  return { sent: true };
 }

@@ -1,56 +1,56 @@
-import type { NextRequest } from "next/server"
-import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import {
-    getPublicSiteOrigin,
-    listLinks,
-    removeUploadLink,
-    toRequestShape,
-} from "@/lib/server/index"
+  getPublicSiteOrigin,
+  listLinks,
+  removeUploadLink,
+  toRequestShape,
+} from "@/lib/server/index";
 
-export const dynamic = "force-dynamic"
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-    try {
-        const origin = getPublicSiteOrigin(toRequestShape(request))
-        const links = await listLinks()
+  try {
+    const origin = getPublicSiteOrigin(toRequestShape(request));
+    const links = await listLinks();
 
-        return NextResponse.json({
-            links: links.map((link) => ({
-                token: link.token,
-                createdAt: link.createdAt,
-                usedAt: link.usedAt,
-                state: link.state,
-                childName: link.childName,
-                edc: link.edc,
-                scheduledDate: link.scheduledDate,
-                bufferStartsAt: link.bufferStartsAt,
-                availableAt: link.availableAt,
-                expiresAt: link.expiresAt,
-                url: `${origin}/portalaccess/${link.token}`,
-            })),
-        })
-    } catch (error) {
-        const message =
-            error instanceof Error ? error.message : "Could not load links"
-        return NextResponse.json({ error: message, links: [] }, { status: 500 })
-    }
+    return NextResponse.json({
+      links: links.map((link) => ({
+        token: link.token,
+        createdAt: link.createdAt,
+        usedAt: link.usedAt,
+        state: link.state,
+        childName: link.childName,
+        edc: link.edc,
+        scheduledDate: link.scheduledDate,
+        bufferStartsAt: link.bufferStartsAt,
+        availableAt: link.availableAt,
+        expiresAt: link.expiresAt,
+        url: `${origin}/portalaccess/${link.token}`,
+      })),
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not load links";
+    return NextResponse.json({ error: message, links: [] }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: NextRequest) {
-    try {
-        const { token } = (await request.json()) as { token?: string }
-        if (!token) {
-            return NextResponse.json(
-                { error: "A link token is required" },
-                { status: 400 }
-            )
-        }
-
-        await removeUploadLink(token)
-        return NextResponse.json({ ok: true })
-    } catch (error) {
-        const message =
-            error instanceof Error ? error.message : "Could not remove link"
-        return NextResponse.json({ error: message }, { status: 500 })
+  try {
+    const { token } = (await request.json()) as { token?: string };
+    if (!token) {
+      return NextResponse.json(
+        { error: "A link token is required" },
+        { status: 400 }
+      );
     }
+
+    await removeUploadLink(token);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not remove link";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

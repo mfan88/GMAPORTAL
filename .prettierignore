@@ -1,7 +1,24 @@
-dist/
-node_modules/
-.next/
-.turbo/
-coverage/
+# dependencies
+node_modules
+
+# next / build
+.next
+out
+build
+coverage
+dist
+
+# generated
+next-env.d.ts
+
+# lockfiles & minified
+package-lock.json
+yarn.lock
 pnpm-lock.yaml
-.pnpm-store/
+*.min.js
+*.min.css
+
+# env / local
+.env
+.env.*
+!.env.example

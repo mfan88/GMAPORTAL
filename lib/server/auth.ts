@@ -4,15 +4,15 @@ import {
   type AuthorizationUrlRequest,
   ConfidentialClientApplication,
   PublicClientApplication,
-} from "@azure/msal-node"
-import { deleteTokenCache } from "./cache"
-import { getAppConfig, updateAppConfig } from "./configHelper"
+} from "@azure/msal-node";
+import { deleteTokenCache } from "./cache";
+import { getAppConfig, updateAppConfig } from "./configHelper";
 import {
   driveBaseFromId,
   encodeDrivePath,
   fetchGraphJson,
   getDriveItemByPath,
-} from "./graph"
+} from "./graph";
 import {
   type ServerMsalClient,
   azureTenantId,
@@ -23,55 +23,55 @@ import {
   msalClientSecret,
   msalAuthority,
   siteGrantScopes,
-} from "./msalHelpers"
+} from "./msalHelpers";
 
-let identityClient: ServerMsalClient | null = null
-let appOnlyClient: ConfidentialClientApplication | null = null
+let identityClient: ServerMsalClient | null = null;
+let appOnlyClient: ConfidentialClientApplication | null = null;
 
 function ensureClientId() {
   if (!msalClientId) {
     throw new Error(
       "Missing NEXT_PUBLIC_AZURE_CLIENT_ID (or AZURE_CLIENT_ID). Set it in .env.local or your host environment."
-    )
+    );
   }
 }
 
 function ensureAppOnlyCredentials() {
-  ensureClientId()
+  ensureClientId();
   if (!msalClientSecret) {
     throw new Error(
       "Missing AZURE_CLIENT_SECRET. Required for Sites.Selected app-only SharePoint access."
-    )
+    );
   }
   if (!azureTenantId) {
     throw new Error(
       "Missing AZURE_TENANT_ID. Required for org-only Sites.Selected app-only tokens."
-    )
+    );
   }
 }
 
 function createIdentityMsalClient(): ServerMsalClient {
-  ensureClientId()
+  ensureClientId();
   const auth = {
     clientId: msalClientId,
     authority: msalAuthority,
     ...(msalClientSecret ? { clientSecret: msalClientSecret } : {}),
-  }
+  };
   if (msalClientSecret) {
-    return new ConfidentialClientApplication({ auth })
+    return new ConfidentialClientApplication({ auth });
   }
-  return new PublicClientApplication({ auth })
+  return new PublicClientApplication({ auth });
 }
 
 function getIdentityClient() {
   if (!identityClient) {
-    identityClient = createIdentityMsalClient()
+    identityClient = createIdentityMsalClient();
   }
-  return identityClient
+  return identityClient;
 }
 
 function getAppOnlyClient() {
-  ensureAppOnlyCredentials()
+  ensureAppOnlyCredentials();
   if (!appOnlyClient) {
     appOnlyClient = new ConfidentialClientApplication({
       auth: {
@@ -79,70 +79,75 @@ function getAppOnlyClient() {
         authority: `https://login.microsoftonline.com/${azureTenantId}`,
         clientSecret: msalClientSecret,
       },
-    })
+    });
   }
-  return appOnlyClient
+  return appOnlyClient;
 }
 
 /** @deprecated Legacy name — identity client only (no file token cache). */
 export function getOneDriveClient() {
-  return getIdentityClient()
+  return getIdentityClient();
 }
 
 function createServerMsalClient(_options?: { persistCache?: boolean }) {
-  return createIdentityMsalClient()
+  return createIdentityMsalClient();
 }
 
 export async function getConfiguredSharePointSiteId(): Promise<string | null> {
-  const config = await getAppConfig()
-  const fromConfig = config.sharePointSiteId?.trim()
-  if (fromConfig) return fromConfig
-  const fromEnv = process.env.SHAREPOINT_SITE_ID?.trim()
-  return fromEnv || null
+  const config = await getAppConfig();
+  const fromConfig = config.sharePointSiteId?.trim();
+  if (fromConfig) return fromConfig;
+  const fromEnv = process.env.SHAREPOINT_SITE_ID?.trim();
+  return fromEnv || null;
 }
 
 export async function getSiteDriveBaseUrl(): Promise<string> {
-  const siteId = await getConfiguredSharePointSiteId()
+  const siteId = await getConfiguredSharePointSiteId();
   if (!siteId) {
     throw new Error(
       "SharePoint site is not configured. Open /setup and connect an org SharePoint site."
-    )
+    );
   }
-  return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drive`
+  return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drive`;
 }
 
 export type GraphDrive = {
-  id?: string
-  name?: string
-  driveType?: string
-}
+  id?: string;
+  name?: string;
+  driveType?: string;
+};
 
-export async function listSiteDrives(accessToken: string): Promise<GraphDrive[]> {
-  const siteId = await getConfiguredSharePointSiteId()
+export async function listSiteDrives(
+  accessToken: string
+): Promise<GraphDrive[]> {
+  const siteId = await getConfiguredSharePointSiteId();
   if (!siteId) {
     throw new Error(
       "SharePoint site is not configured. Open /setup and connect an org SharePoint site."
-    )
+    );
   }
 
-  const drives: GraphDrive[] = []
+  const drives: GraphDrive[] = [];
   let nextUrl: string | undefined =
-    `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drives?$select=id,name,driveType&$top=50`
+    `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/drives?$select=id,name,driveType&$top=50`;
 
   while (nextUrl) {
     const page: {
-      value?: GraphDrive[]
-      "@odata.nextLink"?: string
-    } = await fetchGraphJson(nextUrl, accessToken)
-    drives.push(...(page.value ?? []))
-    nextUrl = page["@odata.nextLink"]
+      value?: GraphDrive[];
+      "@odata.nextLink"?: string;
+    } = await fetchGraphJson(nextUrl, accessToken);
+    drives.push(...(page.value ?? []));
+    nextUrl = page["@odata.nextLink"];
   }
 
-  return drives.filter((drive) => Boolean(drive.id && drive.name))
+  return drives.filter((drive) => Boolean(drive.id && drive.name));
 }
 
 function normalizeFolderPath(folderName: string) {
-  return folderName.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "")
+  return folderName
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 async function findDriveFolderPath(
@@ -151,17 +156,17 @@ async function findDriveFolderPath(
   accessToken: string
 ): Promise<{ driveId: string } | null> {
   for (const drive of drives) {
-    if (!drive.id) continue
+    if (!drive.id) continue;
     try {
-      const item = await getDriveItemByPath(drive.id, folderPath, accessToken)
+      const item = await getDriveItemByPath(drive.id, folderPath, accessToken);
       if (item?.id && item.folder) {
-        return { driveId: drive.id }
+        return { driveId: drive.id };
       }
     } catch {
-      continue
+      continue;
     }
   }
-  return null
+  return null;
 }
 
 /**
@@ -170,46 +175,46 @@ async function findDriveFolderPath(
  * any library on the site.
  */
 export async function resolveUploadLocation(filename: string): Promise<{
-  driveBase: string
-  itemPath: string
+  driveBase: string;
+  itemPath: string;
 }> {
-  const { folderName } = await getAppConfig()
-  const folder = normalizeFolderPath(folderName)
-  const defaultDrive = await getSiteDriveBaseUrl()
+  const { folderName } = await getAppConfig();
+  const folder = normalizeFolderPath(folderName);
+  const defaultDrive = await getSiteDriveBaseUrl();
 
   if (!folder) {
-    return { driveBase: defaultDrive, itemPath: filename }
+    return { driveBase: defaultDrive, itemPath: filename };
   }
 
-  const accessToken = await getOneDriveAccessToken()
-  const drives = await listSiteDrives(accessToken)
-  const slash = folder.indexOf("/")
+  const accessToken = await getOneDriveAccessToken();
+  const drives = await listSiteDrives(accessToken);
+  const slash = folder.indexOf("/");
   if (slash > 0) {
-    const libraryName = folder.slice(0, slash)
-    const rest = folder.slice(slash + 1)
-    const library = drives.find((drive) => drive.name === libraryName)
+    const libraryName = folder.slice(0, slash);
+    const rest = folder.slice(slash + 1);
+    const library = drives.find((drive) => drive.name === libraryName);
     if (library?.id) {
       return {
         driveBase: driveBaseFromId(library.id),
         itemPath: `${rest}/${filename}`,
-      }
+      };
     }
   }
 
-  const library = drives.find((drive) => drive.name === folder)
+  const library = drives.find((drive) => drive.name === folder);
   if (library?.id) {
-    return { driveBase: driveBaseFromId(library.id), itemPath: filename }
+    return { driveBase: driveBaseFromId(library.id), itemPath: filename };
   }
 
-  const located = await findDriveFolderPath(drives, folder, accessToken)
+  const located = await findDriveFolderPath(drives, folder, accessToken);
   if (located) {
     return {
       driveBase: driveBaseFromId(located.driveId),
       itemPath: `${folder}/${filename}`,
-    }
+    };
   }
 
-  return { driveBase: defaultDrive, itemPath: `${folder}/${filename}` }
+  return { driveBase: defaultDrive, itemPath: `${folder}/${filename}` };
 }
 
 /**
@@ -219,45 +224,45 @@ export async function resolveUploadLocation(filename: string): Promise<{
 export async function getOneDriveAccessToken() {
   const result = await getAppOnlyClient().acquireTokenByClientCredential({
     scopes: ["https://graph.microsoft.com/.default"],
-  })
+  });
   if (!result?.accessToken) {
-    throw new Error("Could not acquire Microsoft Graph app-only access token.")
+    throw new Error("Could not acquire Microsoft Graph app-only access token.");
   }
-  return result.accessToken
+  return result.accessToken;
 }
 
 type GraphSite = {
-  id?: string
-  displayName?: string
-  webUrl?: string
-  name?: string
-}
+  id?: string;
+  displayName?: string;
+  webUrl?: string;
+  name?: string;
+};
 
 function sharePointSiteApiPath(siteUrlOrId: string): string {
-  const trimmed = siteUrlOrId.trim().replace(/\/$/, "")
+  const trimmed = siteUrlOrId.trim().replace(/\/$/, "");
   if (!trimmed) {
-    throw new Error("A SharePoint site URL or site id is required.")
+    throw new Error("A SharePoint site URL or site id is required.");
   }
 
   if (!/^https?:\/\//i.test(trimmed)) {
-    return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(trimmed)}`
+    return `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(trimmed)}`;
   }
 
-  const url = new URL(trimmed)
-  const pathname = url.pathname.replace(/\/$/, "") || "/"
-  return `https://graph.microsoft.com/v1.0/sites/${url.hostname}:${pathname}`
+  const url = new URL(trimmed);
+  const pathname = url.pathname.replace(/\/$/, "") || "/";
+  return `https://graph.microsoft.com/v1.0/sites/${url.hostname}:${pathname}`;
 }
 
 export async function resolveSharePointSite(siteUrlOrId: string): Promise<{
-  siteId: string
-  siteUrl: string
-  siteName: string
+  siteId: string;
+  siteUrl: string;
+  siteName: string;
 }> {
-  const accessToken = await getOneDriveAccessToken()
-  const api = sharePointSiteApiPath(siteUrlOrId)
-  const site = await fetchGraphJson<GraphSite>(api, accessToken)
+  const accessToken = await getOneDriveAccessToken();
+  const api = sharePointSiteApiPath(siteUrlOrId);
+  const site = await fetchGraphJson<GraphSite>(api, accessToken);
   if (!site.id) {
-    throw new Error("SharePoint site lookup did not return a site id.")
+    throw new Error("SharePoint site lookup did not return a site id.");
   }
   return {
     siteId: site.id,
@@ -267,26 +272,26 @@ export async function resolveSharePointSite(siteUrlOrId: string): Promise<{
       site.name?.trim() ||
       site.webUrl?.trim() ||
       site.id,
-  }
+  };
 }
 
 export async function connectSharePointSite(siteUrlOrId: string) {
-  const resolved = await resolveSharePointSite(siteUrlOrId)
-  const accessToken = await getOneDriveAccessToken()
+  const resolved = await resolveSharePointSite(siteUrlOrId);
+  const accessToken = await getOneDriveAccessToken();
   await fetchGraphJson<{ id?: string }>(
     `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(resolved.siteId)}/drive?$select=id,webUrl`,
     accessToken
-  )
+  );
   await updateAppConfig({
     sharePointSiteId: resolved.siteId,
     sharePointSiteUrl: resolved.siteUrl,
     sharePointSiteName: resolved.siteName,
-  })
-  return resolved
+  });
+  return resolved;
 }
 
 export async function getConnectedOneDriveAccount(): Promise<AccountInfo | null> {
-  return null
+  return null;
 }
 
 export function oneDriveAccountsMatch(
@@ -298,7 +303,7 @@ export function oneDriveAccountsMatch(
     connected.homeAccountId &&
     signedIn.homeAccountId === connected.homeAccountId
   ) {
-    return true
+    return true;
   }
 
   if (
@@ -306,30 +311,30 @@ export function oneDriveAccountsMatch(
     connected.localAccountId &&
     signedIn.localAccountId === connected.localAccountId
   ) {
-    return true
+    return true;
   }
 
-  const signedInUsername = signedIn.username?.trim().toLowerCase()
-  const connectedUsername = connected.username?.trim().toLowerCase()
+  const signedInUsername = signedIn.username?.trim().toLowerCase();
+  const connectedUsername = connected.username?.trim().toLowerCase();
 
   return Boolean(
     signedInUsername &&
-      connectedUsername &&
-      signedInUsername === connectedUsername
-  )
+    connectedUsername &&
+    signedInUsername === connectedUsername
+  );
 }
 
 export async function getOneDriveConnectionStatus() {
-  const config = await getAppConfig()
+  const config = await getAppConfig();
   const siteId =
     config.sharePointSiteId?.trim() ||
     process.env.SHAREPOINT_SITE_ID?.trim() ||
-    ""
+    "";
   const siteUrl =
     config.sharePointSiteUrl?.trim() ||
     process.env.SHAREPOINT_SITE_URL?.trim() ||
-    ""
-  const siteName = config.sharePointSiteName?.trim() || ""
+    "";
+  const siteName = config.sharePointSiteName?.trim() || "";
 
   if (!siteId && !siteUrl) {
     return {
@@ -339,23 +344,23 @@ export async function getOneDriveConnectionStatus() {
       siteUrl: null as string | null,
       siteName: null as string | null,
       writeAccess: false as boolean,
-    }
+    };
   }
 
   try {
     if (siteId) {
-      const accessToken = await getOneDriveAccessToken()
+      const accessToken = await getOneDriveAccessToken();
       const site = await fetchGraphJson<GraphSite>(
         `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}?$select=id,displayName,webUrl,name`,
         accessToken
-      )
+      );
       const name =
         site.displayName?.trim() ||
         site.name?.trim() ||
         site.webUrl?.trim() ||
         siteName ||
-        siteId
-      const writeAccess = await probeSharePointWriteAccess()
+        siteId;
+      const writeAccess = await probeSharePointWriteAccess();
       return {
         connected: true,
         username: name,
@@ -363,11 +368,11 @@ export async function getOneDriveConnectionStatus() {
         siteUrl: site.webUrl?.trim() || siteUrl || null,
         siteName: name,
         writeAccess,
-      }
+      };
     }
 
-    const resolved = await resolveSharePointSite(siteUrl)
-    const writeAccess = await probeSharePointWriteAccess()
+    const resolved = await resolveSharePointSite(siteUrl);
+    const writeAccess = await probeSharePointWriteAccess();
     return {
       connected: true,
       username: resolved.siteName,
@@ -375,9 +380,9 @@ export async function getOneDriveConnectionStatus() {
       siteUrl: resolved.siteUrl,
       siteName: resolved.siteName,
       writeAccess,
-    }
+    };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = error instanceof Error ? error.message : String(error);
     return {
       connected: false,
       username: null as string | null,
@@ -386,7 +391,7 @@ export async function getOneDriveConnectionStatus() {
       siteName: siteName || null,
       writeAccess: false as boolean,
       error: message,
-    }
+    };
   }
 }
 
@@ -394,20 +399,20 @@ export async function getOneDriveLoginUrl(
   codeChallenge: string,
   req?: {
     headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
+      host?: string;
+      "x-forwarded-proto"?: string | string[];
+    };
   }
 ) {
-  const client = getIdentityClient()
+  const client = getIdentityClient();
   const request: AuthorizationUrlRequest = {
     scopes: [...identityScopes],
     redirectUri: getOneDriveRedirectUri(req),
     prompt: "select_account",
     codeChallenge,
     codeChallengeMethod: "S256",
-  }
-  return client.getAuthCodeUrl(request)
+  };
+  return client.getAuthCodeUrl(request);
 }
 
 export async function completeOneDriveLogin(
@@ -415,14 +420,14 @@ export async function completeOneDriveLogin(
   _codeVerifier: string,
   _req?: {
     headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
+      host?: string;
+      "x-forwarded-proto"?: string | string[];
+    };
   }
 ) {
   throw new Error(
     "Receiving destination is a SharePoint site (Sites.Selected), not a user OneDrive login."
-  )
+  );
 }
 
 export async function clearOneDriveConnection() {
@@ -430,23 +435,23 @@ export async function clearOneDriveConnection() {
     sharePointSiteId: "",
     sharePointSiteUrl: "",
     sharePointSiteName: "",
-  })
-  await deleteTokenCache().catch(() => undefined)
-  identityClient = null
-  appOnlyClient = null
+  });
+  await deleteTokenCache().catch(() => undefined);
+  identityClient = null;
+  appOnlyClient = null;
 }
 
 export async function getUploadAccessLoginUrl(
   codeChallenge: string,
   req?: {
     headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
+      host?: string;
+      "x-forwarded-proto"?: string | string[];
+    };
   },
   loginHint?: string
 ) {
-  const client = createServerMsalClient()
+  const client = createServerMsalClient();
 
   const request: AuthorizationUrlRequest = {
     scopes: [...identityScopes],
@@ -455,9 +460,9 @@ export async function getUploadAccessLoginUrl(
     codeChallenge,
     codeChallengeMethod: "S256",
     ...(loginHint ? { loginHint } : {}),
-  }
+  };
 
-  return client.getAuthCodeUrl(request)
+  return client.getAuthCodeUrl(request);
 }
 
 export async function verifyUploadAccessIdentity(
@@ -465,34 +470,34 @@ export async function verifyUploadAccessIdentity(
   codeVerifier: string,
   req?: {
     headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
+      host?: string;
+      "x-forwarded-proto"?: string | string[];
+    };
   }
 ) {
-  const client = createServerMsalClient()
+  const client = createServerMsalClient();
 
   const request: AuthorizationCodeRequest = {
     code,
     codeVerifier,
     scopes: [...identityScopes],
     redirectUri: getUploadAccessRedirectUri(req),
-  }
+  };
 
-  const result = await client.acquireTokenByCode(request)
-  return result.account ?? null
+  const result = await client.acquireTokenByCode(request);
+  return result.account ?? null;
 }
 
 export async function getSiteGrantLoginUrl(
   codeChallenge: string,
   req?: {
     headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
+      host?: string;
+      "x-forwarded-proto"?: string | string[];
+    };
   }
 ) {
-  const client = createServerMsalClient()
+  const client = createServerMsalClient();
   const request: AuthorizationUrlRequest = {
     scopes: [...siteGrantScopes],
     redirectUri: getUploadAccessRedirectUri(req),
@@ -500,8 +505,8 @@ export async function getSiteGrantLoginUrl(
     prompt: "select_account",
     codeChallenge,
     codeChallengeMethod: "S256",
-  }
-  return client.getAuthCodeUrl(request)
+  };
+  return client.getAuthCodeUrl(request);
 }
 
 export async function acquireSiteGrantToken(
@@ -509,19 +514,19 @@ export async function acquireSiteGrantToken(
   codeVerifier: string,
   req?: {
     headers: {
-      host?: string
-      "x-forwarded-proto"?: string | string[]
-    }
+      host?: string;
+      "x-forwarded-proto"?: string | string[];
+    };
   }
 ) {
-  const client = createServerMsalClient()
+  const client = createServerMsalClient();
   const request: AuthorizationCodeRequest = {
     code,
     codeVerifier,
     scopes: [...siteGrantScopes],
     redirectUri: getUploadAccessRedirectUri(req),
-  }
-  return client.acquireTokenByCode(request)
+  };
+  return client.acquireTokenByCode(request);
 }
 
 /**
@@ -532,9 +537,9 @@ export async function grantSharePointAppWriteAccess(
   adminAccessToken: string,
   siteId: string
 ) {
-  ensureClientId()
+  ensureClientId();
   const displayName =
-    process.env.AZURE_APP_DISPLAY_NAME?.trim() || "GMA Upload Portal"
+    process.env.AZURE_APP_DISPLAY_NAME?.trim() || "GMA Upload Portal";
 
   const res = await fetch(
     `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(siteId)}/permissions`,
@@ -556,34 +561,31 @@ export async function grantSharePointAppWriteAccess(
         ],
       }),
     }
-  )
+  );
 
-  if (res.ok) return
+  if (res.ok) return;
 
-  const details = await res.text()
+  const details = await res.text();
   // Already granted is fine — treat as success when the message indicates conflict.
-  if (
-    res.status === 409 ||
-    /already exists|permission.*exist/i.test(details)
-  ) {
-    return
+  if (res.status === 409 || /already exists|permission.*exist/i.test(details)) {
+    return;
   }
 
   throw new Error(
     `Could not grant app write on the SharePoint site (${res.status}): ${
       details || res.statusText
     }. Sign in as a SharePoint/Global admin, and ensure the Entra app has delegated Sites.FullControl.All with admin consent.`
-  )
+  );
 }
 
 /** True when app-only Sites.Selected can create an upload session (needs write). */
 export async function probeSharePointWriteAccess(): Promise<boolean> {
   try {
-    const accessToken = await getOneDriveAccessToken()
+    const accessToken = await getOneDriveAccessToken();
     const { driveBase, itemPath } = await resolveUploadLocation(
       "gma-write-probe.tmp"
-    )
-    const encodedPath = encodeDrivePath(itemPath)
+    );
+    const encodedPath = encodeDrivePath(itemPath);
     const res = await fetch(
       `${driveBase}/root:/${encodedPath}:/createUploadSession`,
       {
@@ -599,9 +601,9 @@ export async function probeSharePointWriteAccess(): Promise<boolean> {
           },
         }),
       }
-    )
-    return res.ok
+    );
+    return res.ok;
   } catch {
-    return false
+    return false;
   }
 }
