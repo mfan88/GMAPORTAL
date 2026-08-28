@@ -232,3 +232,24 @@
   line-height: 1.45;
   color: #02182b;
 }
+
+.dda-brand {
+  color: #02182b;
+  --foreground: #02182b;
+  --primary: #02182b;
+  --primary-foreground: #ffffff;
+  --ring: #e98300;
+}
+
+.dda-brand [data-slot="button"] {
+  border-radius: 9999px;
+}
+
+.dda-brand [data-slot="button"].border-border {
+  border-color: #e98300;
+}
+
+.dda-brand [data-slot="button"].border-border:hover:not(:disabled) {
+  background-color: #e98300;
+  color: #fff;
+}

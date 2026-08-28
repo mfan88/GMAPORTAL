@@ -300,7 +300,7 @@ function AdminEmailsCard({
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-emails-card-title"
-        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-xl border border-black/15 bg-background p-5 shadow-lg"
+        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-sm border border-[#02182B]/15 bg-white p-5 text-[#02182B] shadow-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
@@ -319,9 +319,9 @@ function AdminEmailsCard({
           </Button>
         </div>
 
-        <ul className="mt-4 divide-y divide-black/10 overflow-y-auto rounded-lg border border-black/10">
+        <ul className="mt-4 divide-y divide-[#02182B]/10 overflow-y-auto rounded-sm border border-[#02182B]/10">
           {emails.length === 0 ? (
-            <li className="px-3 py-3 text-sm text-black/45">
+            <li className="px-3 py-3 text-sm text-[#02182B]/45">
               No admin emails yet.
             </li>
           ) : (
@@ -390,7 +390,7 @@ function AdminEmailsCard({
                 Add
               </Button>
             </div>
-            <p className="text-xs text-black/45">
+            <p className="text-xs text-[#02182B]/45">
               Click − once, then Confirm to remove. Changes apply when you Save
               settings.
             </p>
@@ -813,9 +813,9 @@ export default function SettingsCard({
   };
 
   return (
-    <section className="flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-xl border border-black/15 p-4 shadow-sm sm:p-5">
+    <section className="flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-sm border border-[#02182B]/15 p-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium">Settings</span>
+        <span className="font-heading text-base font-semibold">Settings</span>
         {!editing ? (
           <Button
             size="sm"
@@ -847,11 +847,11 @@ export default function SettingsCard({
       </div>
 
       {!connected ? (
-        <p className="mt-4 text-sm text-black/50">
+        <p className="mt-4 text-sm text-[#02182B]/50">
           Connect a SharePoint site to manage upload settings.
         </p>
       ) : loading || !form ? (
-        <p className="mt-4 text-sm text-black/50">Loading settings…</p>
+        <p className="mt-4 text-sm text-[#02182B]/50">Loading settings…</p>
       ) : (
         <div className="mt-4 flex flex-1 flex-col gap-4">
           <div className="flex flex-col gap-1.5">
@@ -870,7 +870,7 @@ export default function SettingsCard({
               emptyText="No matching folders."
               disabled={!editing}
             />
-            <p className="text-xs text-black/45">
+            <p className="text-xs text-[#02182B]/45">
               Libraries and nested folders, shown as a path (for example GMA
               Video/Inbox). Uploads go to that folder, not the site root.
             </p>
@@ -909,7 +909,7 @@ export default function SettingsCard({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <p className="text-xs text-black/45">
+            <p className="text-xs text-[#02182B]/45">
               Excel (.xlsx) files found in the SharePoint site.
             </p>
           </div>
@@ -1038,7 +1038,7 @@ export default function SettingsCard({
             className={
               columnsError || sameColumnsSelected
                 ? "-mt-2 text-xs text-red-600"
-                : "-mt-2 text-xs text-black/45"
+                : "-mt-2 text-xs text-[#02182B]/45"
             }
           >
             {columnsError
@@ -1084,7 +1084,7 @@ export default function SettingsCard({
               }}
             />
           </div>
-          <p className="-mt-2 text-xs text-black/45">
+          <p className="-mt-2 text-xs text-[#02182B]/45">
             Buffer delays when a new link becomes usable. Availability is how
             long the link stays valid after creation.
           </p>
@@ -1117,7 +1117,7 @@ export default function SettingsCard({
                 Add and remove emails
               </Button>
             </div>
-            <p className="text-xs text-black/45">
+            <p className="text-xs text-[#02182B]/45">
               These work accounts can open this admin console.
               {editing
                 ? " Use Add and remove emails to change the list, then Save."

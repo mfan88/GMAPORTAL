@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Check, CircleHelp, LinkIcon, Minus, Plus, X } from "lucide-react";
+import { Check, LinkIcon, Minus, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Combobox } from "@/components/ui/combobox";
@@ -135,13 +135,13 @@ function NotificationEmailsCard({
         role="dialog"
         aria-modal="true"
         aria-labelledby="notification-emails-card-title"
-        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-xl border border-black/15 bg-background p-5 shadow-lg"
+        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-sm border border-[#02182B]/15 bg-white p-5 text-[#02182B] shadow-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
           <h2
             id="notification-emails-card-title"
-            className="text-sm font-medium"
+            className="font-heading text-base font-semibold"
           >
             {managing
               ? "Add and remove emails"
@@ -159,9 +159,9 @@ function NotificationEmailsCard({
           </Button>
         </div>
 
-        <ul className="mt-4 divide-y divide-black/10 overflow-y-auto rounded-lg border border-black/10">
+        <ul className="mt-4 divide-y divide-[#02182B]/10 overflow-y-auto rounded-sm border border-[#02182B]/10">
           {emails.length === 0 ? (
-            <li className="px-3 py-3 text-sm text-black/45">
+            <li className="px-3 py-3 text-sm text-[#02182B]/45">
               No notification emails yet.
             </li>
           ) : (
@@ -278,7 +278,7 @@ function NotificationEmailsCard({
                 </Button>
               </div>
             </div>
-            <p className="text-xs text-black/45">
+            <p className="text-xs text-[#02182B]/45">
               Click − once, then Confirm to remove. Changes save immediately.
             </p>
           </div>
@@ -729,7 +729,7 @@ export default function ConsolePage() {
   const childPickerContent = (() => {
     if (!connected) {
       return (
-        <p className="text-sm text-black/50">
+        <p className="text-sm text-[#02182B]/50">
           Connect a SharePoint site to load children from the reference
           workbook.
         </p>
@@ -737,7 +737,7 @@ export default function ConsolePage() {
     }
     if (childNamesLoading) {
       return (
-        <p className="text-sm text-black/50">Loading children from workbook…</p>
+        <p className="text-sm text-[#02182B]/50">Loading children from workbook…</p>
       );
     }
     if (childNamesError) {
@@ -745,7 +745,7 @@ export default function ConsolePage() {
     }
     if (childItems.length === 0) {
       return (
-        <p className="text-sm text-black/50">
+        <p className="text-sm text-[#02182B]/50">
           No names found in the configured child name column. Check Settings.
         </p>
       );
@@ -764,7 +764,7 @@ export default function ConsolePage() {
           />
         </div>
         {edcStatement ? (
-          <p className="text-sm text-black/80">{edcStatement}</p>
+          <p className="text-sm text-[#02182B]/80">{edcStatement}</p>
         ) : null}
 
         {selectedChild && !workbookEdc ? (
@@ -778,7 +778,7 @@ export default function ConsolePage() {
                 setSelectedEdc(event.target.value || null);
               }}
             />
-            <p className="text-xs text-black/50">
+            <p className="text-xs text-[#02182B]/50">
               Stored on the link and used to calculate age at upload.
             </p>
           </div>
@@ -810,7 +810,7 @@ export default function ConsolePage() {
                   date={letterScheduleDate}
                   setDate={setLetterScheduleDate}
                 />
-                <p className="text-xs text-black/50">
+                <p className="text-xs text-[#02182B]/50">
                   The portal link stays unavailable until this date. On that day
                   the activation buffer begins.
                 </p>
@@ -823,55 +823,58 @@ export default function ConsolePage() {
   })();
 
   return (
-    <div className="flex min-h-dvh w-full flex-col bg-white text-black lg:h-dvh lg:max-h-dvh lg:overflow-hidden">
-      <header className="box-border flex shrink-0 items-start justify-between gap-3 p-3 sm:gap-4 sm:p-4">
-        <div className="flex min-w-0 flex-col gap-1">
-          <Image
-            className="h-10 w-auto sm:h-14 lg:h-16"
-            src="/images/dda-logo.svg"
-            alt="DDA logo"
-            width={1338}
-            height={472}
-          />
-          <Link
-            href="/"
-            className="w-fit text-xs underline underline-offset-4 sm:text-sm"
-          >
-            {"<<<"} Back to home
+    <div className="dda-brand flex min-h-dvh w-full flex-col bg-white text-[#02182B] lg:h-dvh lg:max-h-dvh lg:overflow-hidden">
+      <header className="shrink-0 border-b border-[#02182B]/10">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+          <Link href="/" className="block h-10 sm:h-12 lg:h-14">
+            <Image
+              className="h-full w-auto"
+              src="/images/dda-logo.svg"
+              alt="Developmental Disabilities Association"
+              width={1338}
+              height={472}
+              priority
+            />
           </Link>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <a
-            href="/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open documentation"
-            aria-label="Open documentation"
-            className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-background text-black shadow-xs hover:bg-muted"
-          >
-            <CircleHelp className="size-4" aria-hidden />
-          </a>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              window.location.assign("/api/auth/admin/logout");
-            }}
-          >
-            Sign out
-          </Button>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded-full border border-[#E98300] px-3 py-1.5 text-xs font-semibold tracking-wide uppercase hover:bg-[#E98300] hover:text-white sm:text-sm"
+            >
+              Documentation
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.assign("/api/auth/admin/logout");
+              }}
+              className="inline-flex items-center rounded-full border border-[#E98300] px-3 py-1.5 text-xs font-semibold tracking-wide uppercase hover:bg-[#E98300] hover:text-white sm:text-sm"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
+      <div className="h-1 shrink-0 bg-[#E98300]" />
 
-      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-3 pb-6 sm:px-6 lg:min-h-0 lg:overflow-hidden lg:pb-4">
-        <h1 className="shrink-0 px-1 text-center text-lg font-medium sm:text-2xl lg:text-3xl">
-          General Movements Assessment (GMA) Video Portal Console
-        </h1>
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6 lg:min-h-0 lg:overflow-hidden lg:py-5">
+        <div className="shrink-0">
+          <p className="text-sm font-semibold tracking-[0.16em] text-[#E98300] uppercase">
+            Vancouver Infant Development Program
+          </p>
+          <h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
+            Staff console
+          </h1>
+        </div>
 
         <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-3 lg:overflow-hidden">
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-black/15 p-4 shadow-sm sm:p-5 lg:min-h-0">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-sm border border-[#02182B]/15 p-4 sm:p-5 lg:min-h-0">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Current Status</span>
+              <span className="font-heading text-base font-semibold">
+                Current Status
+              </span>
               <span className="flex items-center gap-2 text-sm">
                 <span
                   className={`inline-block size-2.5 rounded-full ${
@@ -882,17 +885,17 @@ export default function ConsolePage() {
               </span>
             </div>
 
-            <p className="mt-3 text-sm text-black/70">
+            <p className="mt-3 text-sm text-[#02182B]/70">
               {connected
                 ? `Videos upload to: ${status?.siteName ?? status?.username ?? "SharePoint site"}`
                 : "No SharePoint site is connected yet."}
             </p>
             {connected && status?.siteUrl ? (
-              <p className="mt-1 truncate text-xs text-black/45">
+              <p className="mt-1 truncate text-xs text-[#02182B]/45">
                 {status.siteUrl}
               </p>
             ) : null}
-            <p className="mt-1 text-xs text-black/45">
+            <p className="mt-1 text-xs text-[#02182B]/45">
               Connect your org SharePoint site, then use{" "}
               <span className="font-medium">Grant write access</span> so this
               app can upload (Sites.Selected). That step signs you in once as a
@@ -988,7 +991,7 @@ export default function ConsolePage() {
                   Add and remove emails
                 </Button>
               </div>
-              <p className="text-xs text-black/45">
+              <p className="text-xs text-[#02182B]/45">
                 These addresses receive a message when a parent upload succeeds.
                 Choose an admin email or type any address.
               </p>
@@ -997,9 +1000,9 @@ export default function ConsolePage() {
             <Separator className="my-4" />
 
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">
+              <span className="font-heading text-base font-semibold">
                 Active Links{" "}
-                <span className="text-black/50">
+                <span className="text-[#02182B]/50">
                   (Click to Copy to Clipboard)
                 </span>
               </span>
@@ -1007,7 +1010,7 @@ export default function ConsolePage() {
 
             <div className="mt-3 max-h-64 min-h-0 overflow-y-auto overscroll-contain pr-1 sm:max-h-80 lg:max-h-none lg:flex-1">
               {links.length === 0 ? (
-                <p className="text-sm text-black/40">
+                <p className="text-sm text-[#02182B]/40">
                   No active links yet. Generate one to share with a parent.
                 </p>
               ) : (
@@ -1017,7 +1020,7 @@ export default function ConsolePage() {
                     const isUsed = link.state === "used";
                     const body = (
                       <>
-                        <span className="flex items-center justify-between text-xs text-black/50">
+                        <span className="flex items-center justify-between text-xs text-[#02182B]/50">
                           <span>
                             {format(
                               new Date(link.createdAt),
@@ -1029,14 +1032,14 @@ export default function ConsolePage() {
                             copied={isCopied}
                           />
                         </span>
-                        <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-black/80">
+                        <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-[#02182B]/80">
                           <LinkIcon className="size-3.5 shrink-0" />
                           <span className="min-w-0 truncate">
                             {portalLinkUrl(link.token)}
                           </span>
                         </span>
                         {link.childName && (
-                          <span className="text-xs text-black/55">
+                          <span className="text-xs text-[#02182B]/55">
                             {link.childName}
                             {link.edc ? ` · EDC ${link.edc}` : ""}
                             {link.scheduledDate
@@ -1049,14 +1052,14 @@ export default function ConsolePage() {
                     return (
                       <li key={link.token} className="flex items-stretch gap-2">
                         {isUsed ? (
-                          <div className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg border border-black/10 bg-black/[0.02] px-3 py-2 text-left opacity-70">
+                          <div className="flex min-w-0 flex-1 flex-col gap-1 rounded-sm border border-[#02182B]/10 bg-[#02182B]/[0.02] px-3 py-2 text-left opacity-70">
                             {body}
                           </div>
                         ) : (
                           <button
                             type="button"
                             onClick={() => void copyLink(link)}
-                            className="group flex min-w-0 flex-1 flex-col gap-1 rounded-lg border border-black/10 bg-black/[0.02] px-3 py-2 text-left transition-colors hover:bg-black/[0.05]"
+                            className="group flex min-w-0 flex-1 flex-col gap-1 rounded-sm border border-[#02182B]/10 bg-[#02182B]/[0.02] px-3 py-2 text-left transition-colors hover:bg-[#02182B]/[0.05]"
                           >
                             {body}
                           </button>
@@ -1068,7 +1071,7 @@ export default function ConsolePage() {
                           title={
                             isUsed ? "Remove from list" : "Delete unused link"
                           }
-                          className="flex shrink-0 items-center justify-center rounded-lg border border-black/10 px-2 text-black/40 transition-colors hover:bg-black/[0.05] hover:text-black/80"
+                          className="flex shrink-0 items-center justify-center rounded-sm border border-[#02182B]/10 px-2 text-[#02182B]/40 transition-colors hover:bg-[#02182B]/[0.05] hover:text-[#02182B]/80"
                         >
                           <X className="size-4" />
                         </button>
@@ -1080,13 +1083,15 @@ export default function ConsolePage() {
             </div>
           </section>
 
-          <section className="flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-xl border border-black/15 p-4 shadow-sm sm:p-6">
+          <section className="flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-sm border border-[#02182B]/15 p-4 sm:p-6">
             <div className="flex flex-1 flex-col gap-3">
-              <span className="text-sm font-medium">Create New Link</span>
+              <span className="font-heading text-base font-semibold">
+                Create New Link
+              </span>
               {childPickerContent}
             </div>
             <Button
-              className="mt-4 py-4 sm:py-10"
+              className="mt-4 rounded-full py-4 tracking-wide uppercase sm:py-10"
               size="sm"
               disabled={!canGenerateLink}
               onClick={generateLink}

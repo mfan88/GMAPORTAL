@@ -120,7 +120,7 @@ export function DocsChrome({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 sm:gap-4">
             <Link
               href="/console"
-              className="inline-flex items-center border border-[#E98300] px-3 py-1.5 text-xs font-semibold tracking-wide text-[#02182B] uppercase hover:bg-[#E98300] hover:text-white sm:text-sm"
+              className="inline-flex items-center rounded-full border border-[#E98300] px-3 py-1.5 text-xs font-semibold tracking-wide text-[#02182B] uppercase hover:bg-[#E98300] hover:text-white sm:text-sm"
             >
               Open console
             </Link>
