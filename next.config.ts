@@ -10,6 +10,21 @@ const nextConfig: NextConfig = {
         destination: "/console",
         permanent: true,
       },
+      {
+        source: "/docs/login-and-setup",
+        destination: "/docs/login",
+        permanent: true,
+      },
+      {
+        source: "/docs/after-an-upload",
+        destination: "/docs",
+        permanent: true,
+      },
+      {
+        source: "/docs/for-parents",
+        destination: "/docs",
+        permanent: true,
+      },
     ];
   },
 };

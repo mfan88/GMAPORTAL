@@ -10,11 +10,9 @@ const nav = [
   {
     heading: "Admin workflows",
     items: [
-      { href: "/docs/login-and-setup", label: "Login and setup" },
+      { href: "/docs/login", label: "Login" },
       { href: "/docs/generate-a-link", label: "Generate a link" },
       { href: "/docs/change-settings", label: "Change settings" },
-      { href: "/docs/after-an-upload", label: "After an upload" },
-      { href: "/docs/for-parents", label: "For parents" },
     ],
   },
   {
@@ -22,6 +20,7 @@ const nav = [
     items: [
       { href: "/docs/technical", label: "Overview" },
       { href: "/docs/technical/entra-id-setup", label: "Entra ID setup" },
+      { href: "/docs/technical/azure-email", label: "Azure email setup" },
       { href: "/docs/technical/cloudways-deploy", label: "Cloudways deploy" },
       { href: "/docs/technical/architecture", label: "Architecture" },
       { href: "/docs/technical/api-reference", label: "API reference" },

@@ -23,20 +23,14 @@ export function isFileRedirectSlug(slug: string) {
 
 type DriveItemLookup = {
   id?: string;
-  name?: string;
   webUrl?: string;
-  webDavUrl?: string;
-  sharepointIds?: {
-    listItemUniqueId?: string;
-    siteUrl?: string;
-  };
 };
 
 async function lookupDriveItem(itemId: string, driveId?: string) {
   const accessToken = await getOneDriveAccessToken();
   const base = driveId ? driveBaseFromId(driveId) : await getSiteDriveBaseUrl();
   const res = await fetch(
-    `${base}/items/${encodeURIComponent(itemId)}?$select=id,name,webUrl,webDavUrl,sharepointIds`,
+    `${base}/items/${encodeURIComponent(itemId)}?$select=id,webUrl`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
@@ -55,45 +49,8 @@ async function lookupDriveItem(itemId: string, driveId?: string) {
 }
 
 /**
- * Office Stream (on SharePoint) player URL, not the raw file download/library link.
- */
-function toStreamViewUrl(item: DriveItemLookup): string | null {
-  const siteUrl = item.sharepointIds?.siteUrl?.replace(/\/+$/, "") ?? "";
-  const uniqueId = item.sharepointIds?.listItemUniqueId?.trim() ?? "";
-
-  if (siteUrl && uniqueId) {
-    const stream = new URL(`${siteUrl}/_layouts/15/stream.aspx`);
-    stream.searchParams.set("UniqueId", uniqueId);
-    stream.searchParams.set("referrer", "StreamWebApp.Web");
-    stream.searchParams.set("referrerScenario", "AddressBarCopied.view");
-    return stream.toString();
-  }
-
-  const fileUrl = item.webDavUrl?.trim() || item.webUrl?.trim() || "";
-  if (siteUrl && fileUrl) {
-    try {
-      const path = new URL(fileUrl).pathname;
-      if (path && path !== "/") {
-        const stream = new URL(`${siteUrl}/_layouts/15/stream.aspx`);
-        stream.searchParams.set("id", path);
-        stream.searchParams.set("referrer", "StreamWebApp.Web");
-        stream.searchParams.set("referrerScenario", "AddressBarCopied.view");
-        return stream.toString();
-      }
-    } catch {
-      // Fall through to webUrl.
-    }
-  }
-
-  const webUrl = item.webUrl?.trim() || "";
-  if (webUrl.includes("/:v:/")) return webUrl;
-  return webUrl || null;
-}
-
-/**
  * Persist an opaque slug for the Graph item and return a same-origin URL.
- * Does not change SharePoint permissions — visitors still open the Stream
- * player after the redirect.
+ * Recipients still need existing org access — this only opens Graph webUrl.
  */
 export async function createFileRedirectUrl(
   request: NextRequest,
@@ -111,7 +68,7 @@ export async function createFileRedirectUrl(
 }
 
 /**
- * Current Stream player URL for a slug, or null if the mapping/file is gone.
+ * Current Graph webUrl for a slug, or null if the mapping/file is gone.
  */
 export async function resolveFileRedirectWebUrl(
   slug: string
@@ -123,16 +80,11 @@ export async function resolveFileRedirectWebUrl(
   if (!stored?.itemId) return null;
 
   const item = await lookupDriveItem(stored.itemId, stored.driveId);
-  if (!item?.id) {
+  const webUrl = item?.webUrl?.trim() || "";
+  if (!item?.id || !webUrl) {
     await getRedis().del(key);
     return null;
   }
 
-  const streamUrl = toStreamViewUrl(item);
-  if (!streamUrl) {
-    await getRedis().del(key);
-    return null;
-  }
-
-  return streamUrl;
+  return webUrl;
 }

@@ -13,7 +13,7 @@ export default function GenerateALinkPage() {
     >
       <p>
         If OneDrive is not connected yet, finish{" "}
-        <Link href="/docs/login-and-setup">Login and setup</Link> first. The
+        <Link href="/docs/login">Login</Link> first. The
         admin console is at{" "}
         <a href="https://upload.develop.bc.ca/console">
           upload.develop.bc.ca/console

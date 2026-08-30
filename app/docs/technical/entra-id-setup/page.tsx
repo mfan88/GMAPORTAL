@@ -224,9 +224,7 @@ export default function EntraIdSetupPage() {
           Registration alone does not finish clinic setup. After env vars are
           deployed, an allowlisted admin signs in at <code>/console</code> and
           connects the receiving OneDrive — see{" "}
-          <Link href="/docs/login-and-setup">
-            Login and setup
-          </Link>
+          <Link href="/docs/login">Login</Link>
           .
         </p>
       </DocArticle>

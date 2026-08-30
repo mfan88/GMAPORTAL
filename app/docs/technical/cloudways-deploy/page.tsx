@@ -129,9 +129,7 @@ export default function CloudwaysDeployPage() {
         <h2>Next</h2>
         <p>
           Confirm the live site loads, then finish clinic connection in{" "}
-          <Link href="/docs/login-and-setup">
-            Login and setup
-          </Link>
+          <Link href="/docs/login">Login</Link>
           .
         </p>
       </DocArticle>
