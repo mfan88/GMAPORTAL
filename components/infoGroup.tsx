@@ -31,10 +31,10 @@ function MobileInfoGroup() {
   const { date, setDate } = useFileProviderContext();
 
   return (
-    <div className="box-border flex w-full flex-col gap-3">
-      <Field className="w-full">
+    <div className="box-border flex min-w-0 w-full max-w-full flex-col gap-3">
+      <Field className="min-w-0 w-full max-w-full">
         <FieldLabel>Date recorded</FieldLabel>
-        <MobileDatePicker className="w-full" date={date} setDate={setDate} />
+        <MobileDatePicker date={date} setDate={setDate} />
         <FieldDescription>
           Please pick the date on which the video was taken
         </FieldDescription>

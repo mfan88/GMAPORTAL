@@ -59,8 +59,8 @@ export default function ParentUploadView() {
           General Movement Assessment Video Upload
         </h1>
 
-        <div className="mt-10 grid gap-8 lg:grid-cols-2 lg:items-start lg:gap-12">
-          <section className="rounded-sm border border-[#02182B]/15 p-5 sm:p-6">
+        <div className="mt-10 grid min-w-0 gap-8 lg:grid-cols-2 lg:items-start lg:gap-12">
+          <section className="min-w-0 overflow-hidden rounded-sm border border-[#02182B]/15 p-5 sm:p-6">
             <Instructions />
             <div className="mt-6 hidden sm:block">
               <InfoGroup />
@@ -70,7 +70,7 @@ export default function ParentUploadView() {
             </div>
           </section>
 
-          <section className="rounded-sm border border-[#02182B]/15 p-5 sm:p-6">
+          <section className="min-w-0 overflow-hidden rounded-sm border border-[#02182B]/15 p-5 sm:p-6">
             <h2 className="font-heading mb-4 text-xl font-semibold">
               Your video
             </h2>

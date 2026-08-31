@@ -92,17 +92,25 @@ export function MobileDatePicker({
   };
 
   return (
-    <div className={cn("relative w-full", className)}>
-      {/* Keep native appearance — appearance-none breaks iOS Safari date UI. */}
+    <div className={cn("relative min-w-0 w-full max-w-full", className)}>
+      <div
+        className={cn(
+          "pointer-events-none box-border flex h-11 min-w-0 w-full max-w-full items-center justify-between gap-2 overflow-hidden rounded-sm border border-[#02182B]/20 bg-white px-3 py-2 text-base",
+          date ? "text-[#02182B]" : "text-[#02182B]/45"
+        )}
+        aria-hidden
+      >
+        <span className="min-w-0 truncate">
+          {date ? format(date, "EEEE, MMMM d, yyyy") : "YYYY-MM-DD"}
+        </span>
+        <CalendarIcon className="size-4 shrink-0 text-[#02182B]/50" />
+      </div>
       <input
         type="date"
         value={toDateInputValue(date)}
         onChange={onChange}
-        className={cn(
-          "box-border h-11 w-full touch-manipulation rounded-md border border-gray-500 bg-white px-3 py-2 text-base text-black shadow-xs outline-none",
-          "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-          !date && "text-muted-foreground"
-        )}
+        aria-label="Date recorded"
+        className="absolute inset-0 z-10 h-full w-full max-w-full cursor-pointer touch-manipulation opacity-0"
       />
     </div>
   );
