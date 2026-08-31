@@ -726,6 +726,10 @@ export async function listChildNamesFromReferenceWorkbook(
     });
   }
 
+  children.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+
   return {
     children,
     names: children.map((child) => child.name),

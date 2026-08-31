@@ -670,10 +670,14 @@ export default function ConsolePage() {
 
   const childItems = useMemo(
     () =>
-      children.map((child) => ({
-        label: child.name,
-        value: child.name,
-      })),
+      [...children]
+        .sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+        )
+        .map((child) => ({
+          label: child.name,
+          value: child.name,
+        })),
     [children]
   );
 
