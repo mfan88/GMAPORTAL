@@ -81,7 +81,15 @@ function LinkStatusBadge({
 type ReferenceChild = {
   name: string;
   edc: string | null;
+  familyEmail: string | null;
 };
+
+function formatEdcLabel(edc: string | null) {
+  if (!edc) return "N/A";
+  const [year, month, day] = edc.split("-").map(Number);
+  if (!year || !month || !day) return edc;
+  return format(new Date(year, month - 1, day), "MMM d, yyyy");
+}
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
@@ -433,10 +441,13 @@ export default function ConsolePage() {
     setPendingRemoveNotification(email);
   };
 
-  const loadChildNames = useCallback(() => {
-    setChildNamesLoading(true);
-    setChildNamesError(null);
-    void fetch("/api/onedrive/child-names")
+  const loadChildNames = useCallback((options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setChildNamesLoading(true);
+      setChildNamesError(null);
+    }
+    void fetch("/api/onedrive/child-names", { cache: "no-store" })
       .then(async (res) => {
         const data = (await res.json()) as {
           children?: ReferenceChild[];
@@ -448,22 +459,30 @@ export default function ConsolePage() {
         }
         const nextChildren =
           data.children ??
-          (data.names ?? []).map((name) => ({ name, edc: null }));
+          (data.names ?? []).map((name) => ({
+            name,
+            edc: null,
+            familyEmail: null,
+          }));
         setChildren(nextChildren);
         setSelectedChild((current) =>
           current && nextChildren.some((child) => child.name === current)
             ? current
             : null
         );
+        if (!silent) setChildNamesError(null);
       })
       .catch((error: unknown) => {
+        if (silent) return;
         const message =
           error instanceof Error ? error.message : "Could not load child names";
         setChildren([]);
         setSelectedChild(null);
         setChildNamesError(message);
       })
-      .finally(() => setChildNamesLoading(false));
+      .finally(() => {
+        if (!silent) setChildNamesLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -634,18 +653,20 @@ export default function ConsolePage() {
     const timeout = window.setTimeout(() => {
       loadChildNames();
     }, 0);
-    return () => window.clearTimeout(timeout);
+    const interval = window.setInterval(() => {
+      loadChildNames({ silent: true });
+    }, 15000);
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
   }, [connected, loadChildNames]);
 
   const workbookEdc =
     children.find((child) => child.name === selectedChild)?.edc ?? null;
-
-  let edcStatement: string | null = null;
-  if (selectedChild && workbookEdc) {
-    edcStatement = `EDC on file for ${selectedChild}: ${workbookEdc}. Age in weeks will be calculated from this EDC to the date the parent records on upload.`;
-  } else if (selectedChild) {
-    edcStatement = `No EDC on file for ${selectedChild}. Enter one below to generate a link.`;
-  }
+  const familyEmail =
+    children.find((child) => child.name === selectedChild)?.familyEmail ??
+    null;
 
   const childItems = useMemo(
     () =>
@@ -763,8 +784,28 @@ export default function ConsolePage() {
             emptyText="No matching names."
           />
         </div>
-        {edcStatement ? (
-          <p className="text-sm text-[#02182B]/80">{edcStatement}</p>
+        {selectedChild ? (
+          <div className="rounded-sm border border-[#02182B]/15 p-4">
+            <p className="text-[11px] font-semibold tracking-[0.16em] text-[#E98300] uppercase">
+              Selected child
+            </p>
+            <dl className="mt-3 space-y-2 text-sm">
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-xs text-[#02182B]/50">Name</dt>
+                <dd className="font-medium">{selectedChild}</dd>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-xs text-[#02182B]/50">EDC date</dt>
+                <dd className="font-medium">{formatEdcLabel(workbookEdc)}</dd>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-xs text-[#02182B]/50">Family email</dt>
+                <dd className="font-medium break-all">
+                  {familyEmail ?? "N/A"}
+                </dd>
+              </div>
+            </dl>
+          </div>
         ) : null}
 
         {selectedChild && !workbookEdc ? (

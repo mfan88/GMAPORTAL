@@ -342,7 +342,10 @@ async function loadWorkbookSheet(
     ? driveBaseFromId(workbook.driveId)
     : await getSiteDriveBaseUrl();
   const contentRes = await fetch(`${driveBase}/items/${workbook.id}/content`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Cache-Control": "no-cache",
+    },
     cache: "no-store",
     redirect: "follow",
   });
@@ -592,6 +595,36 @@ function resolveColumnIndex(
   );
 }
 
+function resolveOptionalEmailColumnIndex(headerRow: unknown[]): number | null {
+  const headers = headerRow.map((cell) =>
+    cellToDisplayString(cell).toLowerCase()
+  );
+  const preferred = [
+    "family email",
+    "family e-mail",
+    "parent email",
+    "guardian email",
+    "caregiver email",
+    "email",
+    "e-mail",
+  ];
+  for (const name of preferred) {
+    const index = headers.findIndex((header) => header === name);
+    if (index !== -1) return index;
+  }
+  const fuzzy = headers.findIndex(
+    (header) => header.includes("email") || header.includes("e-mail")
+  );
+  return fuzzy === -1 ? null : fuzzy;
+}
+
+function parseWorkbookEmail(value: unknown): string | null {
+  const text = cellToDisplayString(value);
+  if (!text) return null;
+  const match = text.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+  return match?.[0] ?? null;
+}
+
 function parseWorkbookDate(value: unknown): string | null {
   if (value == null || value === "") return null;
 
@@ -621,6 +654,8 @@ export type ReferenceChild = {
   name: string;
   /** ISO date (YYYY-MM-DD) from the EDC column, when parseable. */
   edc: string | null;
+  /** Family/parent email from the workbook, when present. */
+  familyEmail: string | null;
 };
 
 /**
@@ -674,6 +709,7 @@ export async function listChildNamesFromReferenceWorkbook(
   const headerRow = (rows[0] ?? []) as unknown[];
   const nameIndex = resolveColumnIndex(headerRow, column, "Child name column");
   const edcIndex = resolveColumnIndex(headerRow, edcColumn, "EDC column");
+  const emailIndex = resolveOptionalEmailColumnIndex(headerRow);
   const seen = new Set<string>();
   const children: ReferenceChild[] = [];
 
@@ -685,6 +721,8 @@ export async function listChildNamesFromReferenceWorkbook(
     children.push({
       name,
       edc: parseWorkbookDate(cells[edcIndex]),
+      familyEmail:
+        emailIndex == null ? null : parseWorkbookEmail(cells[emailIndex]),
     });
   }
 
