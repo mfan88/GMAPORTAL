@@ -2,14 +2,7 @@
 
 import { UploadFile, useFileProviderContext } from "@/app/fileprovider";
 import { cn } from "@/lib/utils";
-import { useLiveUploadPercent } from "@/lib/upload";
-import {
-  CircleCheck,
-  FileText,
-  Loader2,
-  Trash2Icon,
-  TriangleAlert,
-} from "lucide-react";
+import { CircleCheck, FileText, Trash2Icon, TriangleAlert } from "lucide-react";
 import {
   Attachment,
   AttachmentAction,
@@ -46,7 +39,6 @@ export default function FileDisplay({
     uploadError,
     uploadResult,
   } = useFileProviderContext();
-  const percent = useLiveUploadPercent();
 
   const removeFile = () => {
     if (isUploading) return;
@@ -70,7 +62,7 @@ export default function FileDisplay({
   const description = !file
     ? "Please remove the file and try again"
     : isUploading
-      ? `Uploading ${percent}% — please do not close the page`
+      ? "Uploading — please keep this page open"
       : uploadError
         ? uploadError
         : uploadResult
@@ -84,9 +76,7 @@ export default function FileDisplay({
       className={cn("min-w-0 flex-nowrap overflow-hidden", className)}
     >
       <AttachmentMedia>
-        {isUploading ? (
-          <Loader2 data-slot="spinner" className="animate-spin" />
-        ) : uploadResult ? (
+        {uploadResult ? (
           <CircleCheck className="text-green-600" />
         ) : uploadError || !file ? (
           <TriangleAlert />

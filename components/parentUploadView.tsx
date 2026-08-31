@@ -2,6 +2,7 @@
 
 import { InfoGroup, MobileInfoGroup } from "@/components/infoGroup";
 import { UploadArea, MobileUploadArea } from "@/components/uploadArea";
+import ProgressDrawer from "@/components/progressDrawer";
 import { useFileProviderContext } from "@/app/fileprovider";
 import Image from "next/image";
 import { Separator } from "@/components/ui/separator";
@@ -88,6 +89,7 @@ export default function ParentUploadView() {
           <MobileUploadArea />
         </section>
       </div>
+      <ProgressDrawer />
     </div>
   );
 }
