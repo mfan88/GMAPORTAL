@@ -24,13 +24,26 @@ export function isFileRedirectSlug(slug: string) {
 type DriveItemLookup = {
   id?: string;
   webUrl?: string;
+  sharepointIds?: {
+    listItemUniqueId?: string;
+    siteUrl?: string;
+  };
 };
 
-async function lookupDriveItem(itemId: string, driveId?: string) {
+type DriveItemPreview = {
+  getUrl?: string;
+};
+
+async function itemBase(itemId: string, driveId?: string) {
   const accessToken = await getOneDriveAccessToken();
   const base = driveId ? driveBaseFromId(driveId) : await getSiteDriveBaseUrl();
+  return { accessToken, base, itemId };
+}
+
+async function lookupDriveItem(itemId: string, driveId?: string) {
+  const { accessToken, base } = await itemBase(itemId, driveId);
   const res = await fetch(
-    `${base}/items/${encodeURIComponent(itemId)}?$select=id,webUrl`,
+    `${base}/items/${encodeURIComponent(itemId)}?$select=id,webUrl,sharepointIds`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
@@ -48,9 +61,38 @@ async function lookupDriveItem(itemId: string, driveId?: string) {
   return (await res.json()) as DriveItemLookup;
 }
 
+/** SharePoint/OneDrive Preview (not the inline HTML5 video player). */
+async function lookupDriveItemPreviewUrl(itemId: string, driveId?: string) {
+  const { accessToken, base } = await itemBase(itemId, driveId);
+  const res = await fetch(
+    `${base}/items/${encodeURIComponent(itemId)}/preview`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+      cache: "no-store",
+    }
+  );
+  if (!res.ok) return null;
+  const preview = (await res.json()) as DriveItemPreview;
+  return preview.getUrl?.trim() || null;
+}
+
+function sharePointEmbedPreviewUrl(item: DriveItemLookup) {
+  const uniqueId = item.sharepointIds?.listItemUniqueId?.trim();
+  const siteUrl = item.sharepointIds?.siteUrl?.replace(/\/+$/, "");
+  if (!uniqueId || !siteUrl) return null;
+  const id = uniqueId.replace(/^\{|\}$/g, "");
+  return `${siteUrl}/_layouts/15/embed.aspx?UniqueId=${encodeURIComponent(id)}`;
+}
+
 /**
  * Persist an opaque slug for the Graph item and return a same-origin URL.
- * Recipients still need existing org access — this only opens Graph webUrl.
+ * Recipients still need existing org access. The slug opens Preview when
+ * Graph or SharePoint can provide it; otherwise it falls back to webUrl.
  */
 export async function createFileRedirectUrl(
   request: NextRequest,
@@ -68,7 +110,8 @@ export async function createFileRedirectUrl(
 }
 
 /**
- * Current Graph webUrl for a slug, or null if the mapping/file is gone.
+ * Preview URL for a slug, or null if the mapping/file is gone.
+ * Preview is generated on each click so the Graph getUrl stays fresh.
  */
 export async function resolveFileRedirectWebUrl(
   slug: string
@@ -86,5 +129,11 @@ export async function resolveFileRedirectWebUrl(
     return null;
   }
 
-  return webUrl;
+  const previewUrl = await lookupDriveItemPreviewUrl(
+    stored.itemId,
+    stored.driveId
+  );
+  if (previewUrl) return previewUrl;
+
+  return sharePointEmbedPreviewUrl(item) ?? webUrl;
 }
