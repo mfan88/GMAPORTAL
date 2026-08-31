@@ -5,90 +5,84 @@ import { UploadArea, MobileUploadArea } from "@/components/uploadArea";
 import ProgressDrawer from "@/components/progressDrawer";
 import { useFileProviderContext } from "@/app/fileprovider";
 import Image from "next/image";
-import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 
 function formatWindowTime(ms: number) {
   return format(new Date(ms), "MMM d, yyyy 'at' h:mm a");
 }
 
-function InstructionsText() {
+function Instructions() {
   const { uploadWindow, linkContextReady } = useFileProviderContext();
 
-  if (linkContextReady && uploadWindow) {
-    return `Please upload a video between ${formatWindowTime(uploadWindow.availableAt)} and ${formatWindowTime(uploadWindow.expiresAt)}, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.`;
-  }
+  const windowLine =
+    linkContextReady && uploadWindow
+      ? `Please upload a video between ${formatWindowTime(uploadWindow.availableAt)} and ${formatWindowTime(uploadWindow.expiresAt)}.`
+      : "Please upload a video within the time window on your clinic link.";
 
-  return "Please upload a video within the time window on your clinic link, and fill out the information below.\n\nThank you for sharing this video. It will only be watched for assessment purposes, by physiotherapists certified in this type of assessment.";
+  return (
+    <div className="space-y-4">
+      <h2 className="font-heading text-xl font-semibold">Instructions</h2>
+      <p className="leading-relaxed text-[#02182B]/80">{windowLine}</p>
+      <p className="leading-relaxed text-[#02182B]/80">
+        Fill out the date the video was recorded, then add one video. Thank you
+        for sharing this recording. It will only be watched for assessment
+        purposes, by physiotherapists certified in this type of assessment.
+      </p>
+    </div>
+  );
 }
 
 export default function ParentUploadView() {
   return (
-    <div className="min-h-dvh max-w-dvw bg-white text-black">
-      <header className="box-border flex h-[10dvh] max-h-[10dvh] shrink-0 items-center justify-between overflow-hidden px-4 py-2">
-        <Image
-          className="h-full max-h-full w-auto object-contain"
-          src="/images/dda-logo.svg"
-          alt="Developmental Disabilities Association"
-          width={1338}
-          height={472}
-          priority
-        />
-      </header>
-
-      <div className="flex hidden h-auto w-full flex-col gap-5 bg-white p-6 text-black select-none sm:block">
-        <section className="h-4em box-border flex justify-center p-15">
-          <h1 className="text-center font-medium text-black md:text-xl lg:text-4xl">
-            General Movements Assessment (GMA) Video Portal for the Vancouver
-            Infant Development Program
-          </h1>
-        </section>
-        <section className="flex w-full flex-row gap-0">
-          <div className="relative flex w-[50%] flex-shrink-0 flex-row items-center justify-center">
-            <UploadArea className="flex h-[50%] w-full flex-shrink-0" />
-            <Separator
-              orientation="vertical"
-              className="absolute right-0 h-full rounded-sm bg-black/50 p-0.25"
+    <div className="dda-brand min-h-dvh bg-white text-[#02182B]">
+      <header className="border-b border-[#02182B]/10">
+        <div className="mx-auto flex w-full max-w-5xl items-center px-4 py-4 sm:px-6">
+          <div className="block h-10 sm:h-12 lg:h-14">
+            <Image
+              className="h-full w-auto"
+              src="/images/dda-logo.svg"
+              alt="Developmental Disabilities Association"
+              width={1338}
+              height={472}
+              priority
             />
           </div>
-          <div className="box-border flex w-full flex-col px-20">
-            <div className="flex flex-col gap-5">
-              <section>
-                <span className="text-xl font-medium">Instructions</span>
-                <Separator
-                  orientation="horizontal"
-                  className="rounded p-0.25"
-                />
-              </section>
-              <span className="text-md whitespace-pre-line">
-                <InstructionsText />
-              </span>
+        </div>
+      </header>
+      <div className="h-1 bg-[#E98300]" />
+
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+        <p className="text-sm font-semibold tracking-[0.16em] text-[#E98300] uppercase">
+          Vancouver Infant Development Program
+        </p>
+        <h1 className="font-heading mt-3 text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
+          General Movement Assessment Video Upload
+        </h1>
+
+        <div className="mt-10 grid gap-8 lg:grid-cols-2 lg:items-start lg:gap-12">
+          <section className="rounded-sm border border-[#02182B]/15 p-5 sm:p-6">
+            <Instructions />
+            <div className="mt-6 hidden sm:block">
               <InfoGroup />
             </div>
-          </div>
-        </section>
-      </div>
+            <div className="mt-6 sm:hidden">
+              <MobileInfoGroup />
+            </div>
+          </section>
 
-      <div className="h-auto w-dvw bg-white pb-[calc(6rem+env(safe-area-inset-bottom,0px))] sm:hidden">
-        <section className="box-border flex h-auto justify-center p-10">
-          <h1 className="text-center font-medium text-black">
-            General Movements Assessment (GMA) Video Portal for the Vancouver
-            Infant Development Program
-          </h1>
-        </section>
-        <section className="flex h-auto w-full flex-col gap-1 px-10">
-          <h2 className="font-medium">Instructions</h2>
-          <span className="text-md whitespace-pre-line">
-            <InstructionsText />
-          </span>
-        </section>
-        <section className="mt-5 box-border w-full px-10">
-          <MobileInfoGroup />
-        </section>
-        <section className="mt-5 box-border w-full px-10">
-          <MobileUploadArea />
-        </section>
-      </div>
+          <section className="rounded-sm border border-[#02182B]/15 p-5 sm:p-6">
+            <h2 className="font-heading mb-4 text-xl font-semibold">
+              Your video
+            </h2>
+            <div className="hidden sm:block">
+              <UploadArea className="w-full" />
+            </div>
+            <div className="sm:hidden">
+              <MobileUploadArea />
+            </div>
+          </section>
+        </div>
+      </main>
       <ProgressDrawer />
     </div>
   );

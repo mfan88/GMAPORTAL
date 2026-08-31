@@ -11,11 +11,11 @@ function InfoGroup() {
   const { date, setDate } = useFileProviderContext();
 
   return (
-    <div className="box-border flex flex-col gap-6 pr-4 pb-4 sm:flex-row">
-      <Field className="w-[80%]">
-        <FieldLabel>Date Recorded</FieldLabel>
+    <div className="box-border flex w-full flex-col gap-2">
+      <Field className="w-full">
+        <FieldLabel>Date recorded</FieldLabel>
         <DatePicker
-          className="border border-gray-500 sm:border-none"
+          className="w-full max-w-sm rounded-sm border border-[#02182B]/20"
           date={date}
           setDate={setDate}
         />
@@ -33,7 +33,7 @@ function MobileInfoGroup() {
   return (
     <div className="box-border flex w-full flex-col gap-3">
       <Field className="w-full">
-        <FieldLabel>Date Recorded</FieldLabel>
+        <FieldLabel>Date recorded</FieldLabel>
         <MobileDatePicker className="w-full" date={date} setDate={setDate} />
         <FieldDescription>
           Please pick the date on which the video was taken

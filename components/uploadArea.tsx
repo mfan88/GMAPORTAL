@@ -172,14 +172,14 @@ function UploadArea({ className, ...props }: Readonly<UploadAreaProps>) {
   const dropzoneProps = hasFileSelected ? {} : getRootProps();
 
   return (
-    <div className="flex w-[80%] flex-col items-center gap-2">
+    <div className="flex w-full flex-col items-center gap-4">
       <div
         {...dropzoneProps}
         className={cn(
-          "box-border flex flex-col items-center justify-center self-stretch rounded-xl px-20 py-32",
+          "box-border flex w-full flex-col items-center justify-center self-stretch rounded-sm px-6 py-16 text-center",
           hasFileSelected
             ? "border border-transparent"
-            : "cursor-pointer border border-dashed border-black/90",
+            : "cursor-pointer border border-dashed border-[#02182B]/30 hover:border-[#E98300] hover:bg-[#E98300]/5",
           className
         )}
         {...props}
@@ -191,8 +191,8 @@ function UploadArea({ className, ...props }: Readonly<UploadAreaProps>) {
         ) : (
           <>
             <input {...getInputProps()} />
-            <span>Drop or click here to add a video</span>
-            <span className="text-sm text-muted-foreground">
+            <span className="font-medium">Drop or click here to add a video</span>
+            <span className="mt-1 text-sm text-[#02182B]/60">
               Please only select one video
             </span>
           </>
@@ -201,8 +201,7 @@ function UploadArea({ className, ...props }: Readonly<UploadAreaProps>) {
 
       {hasFileSelected && !isUploading && !uploadResult ? (
         <Button
-          className={`w-[65%] ${canUpload ? "bg-blue" : "bg-none"}`}
-          variant="outline"
+          className="w-full max-w-sm rounded-full bg-[#02182B] px-5 py-2.5 text-sm font-semibold tracking-wide text-white uppercase hover:bg-[#02182B]/90 disabled:opacity-40"
           disabled={!canUpload}
           onClick={() => {
             if (!files?.file || !date) return;
@@ -256,7 +255,7 @@ function MobileUploadArea({ className }: Readonly<{ className?: string }>) {
 
   return (
     <div
-      className={cn("mt-4 flex w-full flex-col items-center gap-3", className)}
+      className={cn("flex w-full flex-col items-center gap-3", className)}
     >
       {hasFileSelected ? (
         <FileDisplay className="w-full max-w-full gap-0" file={files} />
@@ -264,7 +263,7 @@ function MobileUploadArea({ className }: Readonly<{ className?: string }>) {
         <div className="relative w-full touch-manipulation">
           <div
             className={cn(
-              "bg-mobile-button flex w-full items-center justify-center rounded-md border border-border px-2.5 py-8 text-base font-medium text-black shadow-xs",
+              "flex w-full items-center justify-center rounded-sm border border-dashed border-[#02182B]/30 px-4 py-10 text-base font-medium text-[#02182B]",
               isUploading && "opacity-50"
             )}
             aria-hidden
@@ -290,8 +289,7 @@ function MobileUploadArea({ className }: Readonly<{ className?: string }>) {
       {hasFileSelected && !isUploading && !uploadResult ? (
         <>
           <Button
-            className={`w-full touch-manipulation ${canUpload ? "bg-blue" : "bg-none"}`}
-            variant="outline"
+            className="w-full touch-manipulation rounded-full bg-[#02182B] px-5 py-2.5 text-sm font-semibold tracking-wide text-white uppercase hover:bg-[#02182B]/90 disabled:opacity-40"
             disabled={!canUpload}
             onClick={() => {
               if (!files?.file || !date) return;
@@ -301,7 +299,7 @@ function MobileUploadArea({ className }: Readonly<{ className?: string }>) {
             Upload
           </Button>
           {!canUpload ? (
-            <p className="w-full text-center text-sm text-muted-foreground">
+            <p className="w-full text-center text-sm text-[#02182B]/60">
               {!date
                 ? "Pick the date recorded above to enable upload."
                 : "Open this page from your clinic link so child details can load."}
