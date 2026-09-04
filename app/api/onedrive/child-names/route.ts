@@ -20,7 +20,11 @@ export async function GET(request: Request) {
   try {
     const accessToken = await getOneDriveAccessToken();
     const result = await listChildNamesFromReferenceWorkbook(accessToken);
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    });
   } catch (error) {
     const message =
       error instanceof Error

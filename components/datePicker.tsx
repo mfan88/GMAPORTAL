@@ -75,6 +75,7 @@ export default function DatePicker({
             setOpen(false);
           }}
           defaultMonth={date}
+          disabled={{after: new Date()}}
         />
       </PopoverContent>
     </Popover>

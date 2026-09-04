@@ -447,7 +447,10 @@ export default function ConsolePage() {
       setChildNamesLoading(true);
       setChildNamesError(null);
     }
-    void fetch("/api/onedrive/child-names", { cache: "no-store" })
+    void fetch(`/api/onedrive/child-names?t=${Date.now()}`, {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-store" },
+    })
       .then(async (res) => {
         const data = (await res.json()) as {
           children?: ReferenceChild[];
@@ -780,6 +783,7 @@ export default function ConsolePage() {
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="child-select">Child</Label>
           <Combobox
+            key={childItems.map((item) => item.value).join("\0")}
             id="child-select"
             items={childItems}
             value={selectedChild}
